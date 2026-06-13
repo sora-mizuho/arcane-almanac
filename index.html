@@ -379,6 +379,49 @@ const postStore = {
   },
 };
 
+/* ---------- クイックメモの保存 ---------- */
+const MEMO_KEY = "coc-memo";
+const memoStore = {
+  load() {
+    try { return JSON.parse(localStorage.getItem(MEMO_KEY) || "[]"); }
+    catch (e) { return []; }
+  },
+  save(list) {
+    try { localStorage.setItem(MEMO_KEY, JSON.stringify(list)); }
+    catch (e) { alert("保存に失敗しました: " + e.message); }
+  },
+};
+
+/* ---------- シナリオ管理の保存 ---------- */
+const SCENARIO_KEY = "coc-scenarios";
+const scenarioStore = {
+  load() {
+    try { return JSON.parse(localStorage.getItem(SCENARIO_KEY) || "[]"); }
+    catch (e) { return []; }
+  },
+  save(list) {
+    try { localStorage.setItem(SCENARIO_KEY, JSON.stringify(list)); }
+    catch (e) { alert("保存に失敗しました: " + e.message); }
+  },
+};
+
+const SCENARIO_STATUSES = ["積み", "未プレイ", "プレイ中", "プレイ済", "GM用"];
+const SCENARIO_STATUS_COLORS = {
+  "積み": "#6E675A", "未プレイ": "#3A6EA5", "プレイ中": "#1F7A4D",
+  "プレイ済": "#8A6A1C", "GM用": "#B0432F",
+};
+
+const blankScenario = () => ({
+  id: "sc" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+  title: "", author: "", edition: "", status: "積み",
+  url: "", memo: "", updatedAt: Date.now(),
+});
+
+const blankMemo = () => ({
+  id: "me" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+  title: "", content: "", updatedAt: Date.now(),
+});
+
 /* URLの種類に応じたリンク表示ラベルを返す */
 function linkLabel(url) {
   const u = String(url).toLowerCase();
@@ -760,7 +803,7 @@ function App() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-  const [view, setView] = useState("calendar");
+  const [view, setView] = useState("home");
   const [draft, setDraft] = useState(null);
   const [savedFlash, setSavedFlash] = useState(false);
   const [ioOpen, setIoOpen] = useState(false);
@@ -802,6 +845,18 @@ function App() {
   const [newPost, setNewPost] = useState({ url: "", tags: "", memo: "" });
   const [postFilter, setPostFilter] = useState("");
   const persistPosts = (list) => { setPosts(list); postStore.save(list); };
+
+  /* クイックメモ */
+  const [memos, setMemos] = useState(() => memoStore.load());
+  const [memoDraft, setMemoDraft] = useState(null);
+  const persistMemos = (list) => { setMemos(list); memoStore.save(list); };
+
+  /* シナリオ管理 */
+  const [scenarios, setScenarios] = useState(() => scenarioStore.load());
+  const [scDraft, setScDraft] = useState(null);
+  const [scFilter, setScFilter] = useState("");
+  const persistScenarios = (list) => { setScenarios(list); scenarioStore.save(list); };
+
   const saveJournal = () => {
     if (!jDraft || (!jDraft.date && !jDraft.scenario.trim())) return;
     const e = { ...jDraft, updatedAt: Date.now() };
@@ -834,6 +889,8 @@ function App() {
         if (Array.isArray(data.journal)) { setJournal(data.journal); journalStore.save(data.journal); }
         if (Array.isArray(data.watch)) { setWatch(data.watch); watchStore.save(data.watch); }
         if (Array.isArray(data.posts)) { setPosts(data.posts); postStore.save(data.posts); }
+        if (Array.isArray(data.memos)) { setMemos(data.memos); memoStore.save(data.memos); }
+        if (Array.isArray(data.scenarios)) { setScenarios(data.scenarios); scenarioStore.save(data.scenarios); }
       }
       setSyncStatus("ok");
       hydratedRef.current = true;
@@ -850,12 +907,12 @@ function App() {
     if (pushTimer.current) clearTimeout(pushTimer.current);
     setSyncStatus("syncing");
     pushTimer.current = setTimeout(() => {
-      cloud.push({ characters, events, journal, watch, posts })
+      cloud.push({ characters, events, journal, watch, posts, memos, scenarios })
         .then((ok) => setSyncStatus(ok ? "ok" : "error"))
         .catch((e) => { console.error(e); setSyncStatus("error"); });
     }, 1200);
     return () => { if (pushTimer.current) clearTimeout(pushTimer.current); };
-  }, [characters, events, journal, watch, posts, syncCode]);
+  }, [characters, events, journal, watch, posts, memos, scenarios, syncCode]);
 
   const applySyncCode = (code) => {
     const c = code.trim();
@@ -872,6 +929,8 @@ function App() {
         if (Array.isArray(data.journal)) { setJournal(data.journal); journalStore.save(data.journal); }
         if (Array.isArray(data.watch)) { setWatch(data.watch); watchStore.save(data.watch); }
         if (Array.isArray(data.posts)) { setPosts(data.posts); postStore.save(data.posts); }
+        if (Array.isArray(data.memos)) { setMemos(data.memos); memoStore.save(data.memos); }
+        if (Array.isArray(data.scenarios)) { setScenarios(data.scenarios); scenarioStore.save(data.scenarios); }
         setSyncStatus("ok");
       } else { setSyncStatus("ok"); }
     }).catch((e) => { console.error(e); setSyncStatus("error"); });
@@ -1013,8 +1072,14 @@ function App() {
     const q = listQuery.trim().toLowerCase();
     if (!q) return true;
     if ([c.name, c.occupation, c.origin].some((t) => String(t || "").toLowerCase().includes(q))) return true;
-    /* 値を振った(初期値から変更した)技能名でも検索 */
-    return Object.keys(c.skills || {}).some((sk) => normName(sk).toLowerCase().includes(q));
+    const rs = RULESETS[c.edition] || RULESETS["6e"];
+    const masterSkills = rs.skillCategories.flatMap((cat) => cat.skills);
+    return Object.entries(c.skills || {}).some(([sk, val]) => {
+      if (!normName(sk).toLowerCase().includes(q)) return false;
+      const def = masterSkills.find((s) => normName(s.n) === normName(sk));
+      if (!def) return true; // 固有技能は初期値がないので常にヒット
+      return num(val) !== num(skillInit(def, c.abilities));
+    });
   };
 
   /* ランダムピックアップ: 名前を高速で切り替えてから1人に決定 */
@@ -1091,11 +1156,14 @@ function App() {
           )}
 
           <div style={isMobile ? { display: "flex", overflowX: "auto", WebkitOverflowScrolling: "touch" } : {}}>
+            {navItem("home", "🏠", "ホーム")}
             {navItem("calendar", "📅", "カレンダー")}
             {navItem("posts", "✕", "ポスト集")}
             {navItem("list", "📖", "探索者名簿")}
             {navItem("journal", "📔", "セッション日誌")}
             {navItem("watch", "▶", "視聴リスト")}
+            {navItem("memo", "📝", "クイックメモ")}
+            {navItem("scenario", "📚", "シナリオ管理")}
             {isMobile && (
               <div onClick={() => setSyncOpen(true)}
                 style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 10px", cursor: "pointer", flex: "1 0 auto", minWidth: 64, color: syncStatus === "ok" ? T.green : syncStatus === "error" ? T.red : T.dim, fontFamily: serif, fontSize: 11 }}>
@@ -1208,6 +1276,143 @@ function App() {
             </div>
           </div>
         )}
+
+        {/* ===== ホーム ===== */}
+        {view === "home" && (() => {
+          const upcoming = (() => {
+            const seen = new Set();
+            const result = [];
+            for (let i = 1; i <= 7; i++) {
+              const d = new Date(); d.setDate(d.getDate() + i);
+              events.filter((ev) => eventOccursOn(ev, d) && !seen.has(ev.id)).forEach((ev) => {
+                seen.add(ev.id);
+                result.push({ ev, firstDate: `${d.getMonth()+1}/${d.getDate()}` });
+              });
+            }
+            return result;
+          })();
+          const recentJournal = [...journal]
+            .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
+            .slice(0, 4);
+          const scStats = SCENARIO_STATUSES.reduce((acc, s) => { acc[s] = scenarios.filter((x) => x.status === s).length; return acc; }, {});
+          const hasToday = todayBirthdays.length > 0 || todayEventsList.length > 0;
+          return (
+            <div>
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontFamily: mono, fontSize: 10, letterSpacing: 2, color: T.gold }}>ARCANE ALMANAC</div>
+                <div style={{ fontFamily: serif, fontSize: 26, margin: "4px 0 2px" }}>おかえりなさい</div>
+                <div style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>
+                  {todayD.getFullYear()}年{todayD.getMonth()+1}月{todayD.getDate()}日
+                </div>
+              </div>
+
+              {hasToday && (
+                <Section title={`TODAY — ${todayD.getMonth()+1}/${todayD.getDate()} 今日`}>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {todayBirthdays.map((c) => (
+                      <div key={c.id} style={{ display: "flex", gap: 10, alignItems: "center", cursor: "pointer" }}
+                        onClick={() => openEdit(c)}>
+                        <span style={{ fontFamily: serif, fontSize: 14, color: T.red }}>🎂 {c.name || "(名称未記入)"} の誕生日</span>
+                        <a href={googleCalendarUrl(c)} target="_blank" rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ fontFamily: mono, fontSize: 10, color: T.green, textDecoration: "none" }}>G+</a>
+                      </div>
+                    ))}
+                    {todayEventsList.map((ev) => (
+                      <div key={ev.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <span style={{ fontFamily: mono, fontSize: 10, color: "#fff", background: EVENT_CATS[ev.cat] || T.dim, padding: "1px 6px", borderRadius: 8 }}>{ev.cat}</span>
+                        {ev.cat === "TRPG" && ev.role && (
+                          <span style={{ fontFamily: mono, fontSize: 10, color: "#fff", background: ev.role === "GM" ? T.gold : T.green, padding: "1px 6px", borderRadius: 8 }}>{ev.role}</span>
+                        )}
+                        <span style={{ fontFamily: serif, fontSize: 14 }}>{ev.time && `${ev.time} `}{ev.title}</span>
+                        {ev.discord && <a href={ev.discord} target="_blank" rel="noreferrer" style={{ fontFamily: mono, fontSize: 11, color: "#5865F2", textDecoration: "none" }}>💬 Discord ↗</a>}
+                        {ev.url && <a href={ev.url} target="_blank" rel="noreferrer" style={{ fontFamily: mono, fontSize: 11, color: T.green, textDecoration: "none" }}>{linkLabel(ev.url)} ↗</a>}
+                      </div>
+                    ))}
+                  </div>
+                </Section>
+              )}
+
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 16 }}>
+                <Section title="UPCOMING — 今後7日間">
+                  {upcoming.length === 0 ? (
+                    <div style={{ fontFamily: serif, fontSize: 13, color: T.dim }}>7日以内の予定はありません</div>
+                  ) : (
+                    <div style={{ display: "grid", gap: 7 }}>
+                      {upcoming.slice(0, 6).map(({ ev, firstDate }) => (
+                        <div key={ev.id} onClick={() => setView("calendar")}
+                          style={{ display: "flex", gap: 8, alignItems: "baseline", cursor: "pointer" }}>
+                          <span style={{ fontFamily: mono, fontSize: 11, color: T.dim, minWidth: 36 }}>{firstDate}</span>
+                          <span style={{ fontFamily: mono, fontSize: 10, color: "#fff", background: EVENT_CATS[ev.cat] || T.dim, padding: "1px 6px", borderRadius: 8, flexShrink: 0 }}>{ev.cat}</span>
+                          <span style={{ fontFamily: serif, fontSize: 13, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ev.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ marginTop: 10 }}><Btn small onClick={() => setView("calendar")}>カレンダーへ →</Btn></div>
+                </Section>
+
+                <Section title="RECENT — 最近のセッション">
+                  {recentJournal.length === 0 ? (
+                    <div style={{ fontFamily: serif, fontSize: 13, color: T.dim }}>記録はありません</div>
+                  ) : (
+                    <div style={{ display: "grid", gap: 7 }}>
+                      {recentJournal.map((j) => {
+                        const ch = charById(j.characterId);
+                        return (
+                          <div key={j.id} onClick={() => { setJournalFocusId(j.id); setView("journal"); }}
+                            style={{ cursor: "pointer", display: "flex", gap: 8, alignItems: "baseline" }}>
+                            <span style={{ fontFamily: mono, fontSize: 11, color: T.dim, whiteSpace: "nowrap" }}>{j.date}</span>
+                            <span style={{ fontFamily: serif, fontSize: 13, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.scenario || "(シナリオ名未記入)"}</span>
+                            {ch && <span style={{ fontFamily: serif, fontSize: 11, color: T.green, whiteSpace: "nowrap" }}>{ch.name}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div style={{ marginTop: 10 }}><Btn small onClick={() => setView("journal")}>日誌へ →</Btn></div>
+                </Section>
+
+                <Section title="MEMO — クイックメモ">
+                  {memos.length === 0 ? (
+                    <div style={{ fontFamily: serif, fontSize: 13, color: T.dim }}>メモはありません</div>
+                  ) : (
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {memos.slice(0, 3).map((m) => (
+                        <div key={m.id} onClick={() => setView("memo")}
+                          style={{ cursor: "pointer", borderBottom: `1px dashed ${T.line}`, paddingBottom: 6 }}>
+                          <div style={{ fontFamily: serif, fontSize: 14, fontWeight: 600 }}>{m.title || "(無題)"}</div>
+                          {m.content && (
+                            <div style={{ fontFamily: serif, fontSize: 12, color: T.dim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {m.content.slice(0, 50)}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ marginTop: 10 }}><Btn small onClick={() => setView("memo")}>メモへ →</Btn></div>
+                </Section>
+
+                <Section title="SCENARIO — シナリオ管理">
+                  {scenarios.length === 0 ? (
+                    <div style={{ fontFamily: serif, fontSize: 13, color: T.dim }}>登録はありません</div>
+                  ) : (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 6 }}>
+                      {SCENARIO_STATUSES.filter((s) => scStats[s] > 0).map((s) => (
+                        <div key={s} style={{ textAlign: "center" }}>
+                          <div style={{ fontFamily: mono, fontSize: 22, color: SCENARIO_STATUS_COLORS[s] }}>{scStats[s]}</div>
+                          <div style={{ fontFamily: mono, fontSize: 10, color: T.dim }}>{s}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ marginTop: 10 }}><Btn small onClick={() => setView("scenario")}>シナリオ一覧へ →</Btn></div>
+                </Section>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ===== 一覧 ===== */}
         {view === "list" && (
@@ -1631,7 +1836,7 @@ function App() {
                         )}
                         {/* シナリオ名の下: リンク類 */}
                         {(ev.discord || ev.url) && (
-                          <div style={{ paddingLeft: 102, marginTop: 3, display: "flex", gap: 14, alignItems: "baseline", flexWrap: "wrap" }}>
+                          <div style={{ marginTop: 3, display: "flex", gap: 14, alignItems: "baseline", flexWrap: "wrap", justifyContent: "flex-end" }}>
                             {ev.discord && (
                               <a href={ev.discord} target="_blank" rel="noreferrer"
                                 style={{ fontFamily: mono, fontSize: 11, color: "#5865F2", textDecoration: "none" }}>💬 Discord ↗</a>
@@ -2018,6 +2223,184 @@ function App() {
             </div>
           );
         })()}
+
+        {/* ===== クイックメモ ===== */}
+        {view === "memo" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ fontFamily: serif, fontSize: 22 }}>クイックメモ <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{memos.length} 件</span></div>
+              <Btn color={T.green} border={T.green} onClick={() => { setMemoDraft(blankMemo()); window.scrollTo({ top: 0, behavior: "smooth" }); }}>+ 新しいメモ</Btn>
+            </div>
+
+            {memoDraft && (
+              <Section title={memos.some((x) => x.id === memoDraft.id) ? "メモを編集 EDIT" : "新しいメモ NEW MEMO"}>
+                <div style={{ display: "grid", gap: 12 }}>
+                  <Field label="タイトル(任意)" value={memoDraft.title}
+                    onChange={(v) => setMemoDraft({ ...memoDraft, title: v })} />
+                  <Area label="内容" rows={8} value={memoDraft.content}
+                    onChange={(v) => setMemoDraft({ ...memoDraft, content: v })}
+                    placeholder="書き留めておきたいことを…" />
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Btn color={T.green} border={T.green} onClick={() => {
+                      if (!memoDraft.content.trim() && !memoDraft.title.trim()) return;
+                      const m = { ...memoDraft, updatedAt: Date.now() };
+                      const exists = memos.some((x) => x.id === m.id);
+                      persistMemos(exists ? memos.map((x) => (x.id === m.id ? m : x)) : [m, ...memos]);
+                      setMemoDraft(null);
+                    }}>保存する</Btn>
+                    <Btn onClick={() => setMemoDraft(null)}>キャンセル</Btn>
+                  </div>
+                </div>
+              </Section>
+            )}
+
+            {memos.length === 0 && !memoDraft && (
+              <div style={{ border: `1px dashed ${T.line}`, padding: 40, textAlign: "center", color: T.dim, fontFamily: serif, background: T.panel }}>
+                まだメモはありません。「+ 新しいメモ」から書き留めましょう。
+              </div>
+            )}
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
+              {memos.map((m) => (
+                <div key={m.id} style={{ background: T.panel, border: `1px solid ${T.line}`, borderTop: `3px solid ${T.gold}`, borderRadius: 2, padding: 16, boxShadow: "0 1px 3px rgba(46,42,35,0.08)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8, gap: 8 }}>
+                    <div style={{ fontFamily: serif, fontSize: 16, fontWeight: 600 }}>{m.title || "(無題)"}</div>
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                      <Btn small onClick={() => { setMemoDraft({ ...m }); window.scrollTo({ top: 0, behavior: "smooth" }); }}>✎</Btn>
+                      <button onClick={() => { if (confirm("このメモを削除しますか?")) persistMemos(memos.filter((x) => x.id !== m.id)); }}
+                        style={{ background: "transparent", border: "none", color: T.red, cursor: "pointer", fontFamily: mono, fontSize: 14 }}>×</button>
+                    </div>
+                  </div>
+                  <div style={{ fontFamily: serif, fontSize: 13.5, lineHeight: 1.8, whiteSpace: "pre-wrap", color: T.paper }}>
+                    {m.content}
+                  </div>
+                  <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, marginTop: 10, textAlign: "right" }}>
+                    {new Date(m.updatedAt).toLocaleDateString("ja-JP")}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ===== シナリオ管理 ===== */}
+        {view === "scenario" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ fontFamily: serif, fontSize: 22 }}>シナリオ管理 <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{scenarios.length} 件</span></div>
+              <Btn color={T.green} border={T.green} onClick={() => { setScDraft(blankScenario()); window.scrollTo({ top: 0, behavior: "smooth" }); }}>+ 追加</Btn>
+            </div>
+
+            {scDraft && (
+              <Section title={scenarios.some((x) => x.id === scDraft.id) ? "シナリオを編集 EDIT" : "シナリオを追加 ADD SCENARIO"}>
+                <div style={{ display: "grid", gap: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr 1fr 1fr", gap: 12, alignItems: "end" }}>
+                    <Field label="シナリオ名 *" value={scDraft.title}
+                      onChange={(v) => setScDraft({ ...scDraft, title: v })} placeholder="例: 悪霊の家" />
+                    <Field label="著者・サークル" value={scDraft.author}
+                      onChange={(v) => setScDraft({ ...scDraft, author: v })} />
+                    <div>
+                      <Label>ルール</Label>
+                      <select value={scDraft.edition} onChange={(e) => setScDraft({ ...scDraft, edition: e.target.value })}
+                        style={{ ...inputStyle, padding: "8px 6px" }}>
+                        <option value="">指定なし</option>
+                        <option value="6e">第6版</option>
+                        <option value="7e">第7版</option>
+                        <option value="other">その他</option>
+                      </select>
+                    </div>
+                    <div>
+                      <Label>ステータス</Label>
+                      <select value={scDraft.status} onChange={(e) => setScDraft({ ...scDraft, status: e.target.value })}
+                        style={{ ...inputStyle, padding: "8px 6px" }}>
+                        {SCENARIO_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <Field label="URL(購入先・紹介ページ等)" value={scDraft.url}
+                    onChange={(v) => setScDraft({ ...scDraft, url: v })} />
+                  <Area label="メモ" rows={3} value={scDraft.memo}
+                    onChange={(v) => setScDraft({ ...scDraft, memo: v })}
+                    placeholder="プレイ時間、参加人数、感想など" />
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Btn color={T.green} border={T.green} onClick={() => {
+                      if (!scDraft.title.trim()) return;
+                      const sc = { ...scDraft, updatedAt: Date.now() };
+                      const exists = scenarios.some((x) => x.id === sc.id);
+                      persistScenarios(exists ? scenarios.map((x) => (x.id === sc.id ? sc : x)) : [sc, ...scenarios]);
+                      setScDraft(null);
+                    }}>保存する</Btn>
+                    <Btn onClick={() => setScDraft(null)}>キャンセル</Btn>
+                  </div>
+                </div>
+              </Section>
+            )}
+
+            <div style={{ marginBottom: 14, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+              <span onClick={() => setScFilter("")}
+                style={{ cursor: "pointer", fontFamily: mono, fontSize: 11, padding: "3px 10px", borderRadius: 10, border: `1px solid ${scFilter === "" ? T.gold : T.line}`, color: scFilter === "" ? T.gold : T.dim }}>
+                すべて ({scenarios.length})
+              </span>
+              {SCENARIO_STATUSES.map((s) => {
+                const n = scenarios.filter((x) => x.status === s).length;
+                return (
+                  <span key={s} onClick={() => setScFilter(s === scFilter ? "" : s)}
+                    style={{ cursor: "pointer", fontFamily: mono, fontSize: 11, padding: "3px 10px", borderRadius: 10, border: `1px solid ${scFilter === s ? SCENARIO_STATUS_COLORS[s] : T.line}`, color: scFilter === s ? SCENARIO_STATUS_COLORS[s] : T.dim }}>
+                    {s} ({n})
+                  </span>
+                );
+              })}
+            </div>
+
+            {scenarios.length === 0 && !scDraft && (
+              <div style={{ border: `1px dashed ${T.line}`, padding: 40, textAlign: "center", color: T.dim, fontFamily: serif, background: T.panel }}>
+                まだ登録がありません。「+ 追加」からシナリオを登録しましょう。
+              </div>
+            )}
+
+            <div style={{ display: "grid", gap: 10 }}>
+              {(scFilter ? scenarios.filter((x) => x.status === scFilter) : scenarios).map((sc) => {
+                const relJournals = journal.filter((j) => j.scenario === sc.title);
+                return (
+                  <div key={sc.id} style={{ background: T.panel, border: `1px solid ${T.line}`, borderLeft: `4px solid ${SCENARIO_STATUS_COLORS[sc.status] || T.dim}`, borderRadius: 2, padding: "12px 16px", boxShadow: "0 1px 3px rgba(46,42,35,0.08)" }}>
+                    <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+                      <span style={{ fontFamily: mono, fontSize: 10, color: "#fff", background: SCENARIO_STATUS_COLORS[sc.status] || T.dim, padding: "2px 8px", borderRadius: 8 }}>{sc.status}</span>
+                      {sc.edition && <span style={{ fontFamily: mono, fontSize: 10, color: T.dim, border: `1px solid ${T.line}`, padding: "1px 6px", borderRadius: 4 }}>{sc.edition === "6e" ? "第6版" : sc.edition === "7e" ? "第7版" : sc.edition}</span>}
+                      <span style={{ fontFamily: serif, fontSize: 17, flex: 1 }}>{sc.title}</span>
+                      {sc.author && <span style={{ fontFamily: serif, fontSize: 13, color: T.dim }}>{sc.author}</span>}
+                      <Btn small onClick={() => { setScDraft({ ...sc }); window.scrollTo({ top: 0, behavior: "smooth" }); }}>✎ 編集</Btn>
+                      <button onClick={() => { if (confirm("このシナリオを削除しますか?")) persistScenarios(scenarios.filter((x) => x.id !== sc.id)); }}
+                        style={{ background: "transparent", border: "none", color: T.red, cursor: "pointer", fontFamily: mono }}>×</button>
+                    </div>
+                    {sc.url && (
+                      <div style={{ marginTop: 6 }}>
+                        <a href={sc.url} target="_blank" rel="noreferrer"
+                          style={{ fontFamily: mono, fontSize: 11, color: T.green, textDecoration: "none" }}>リンク ↗</a>
+                      </div>
+                    )}
+                    {sc.memo && (
+                      <div style={{ fontFamily: serif, fontSize: 13, color: T.dim, marginTop: 6, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{sc.memo}</div>
+                    )}
+                    {relJournals.length > 0 && (
+                      <div style={{ marginTop: 8, borderTop: `1px dashed ${T.line}`, paddingTop: 6, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                        <span style={{ fontFamily: mono, fontSize: 10, color: T.gold }}>📔 日誌:</span>
+                        {relJournals.map((j) => {
+                          const ch = charById(j.characterId);
+                          return (
+                            <span key={j.id} onClick={() => { setJournalFocusId(j.id); setView("journal"); }}
+                              style={{ fontFamily: serif, fontSize: 12, color: T.green, cursor: "pointer", textDecoration: "underline" }}>
+                              {j.date || "日付不明"}{ch ? ` (${ch.name})` : ""}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* ===== 編集 ===== */}
         {view === "edit" && draft && (
