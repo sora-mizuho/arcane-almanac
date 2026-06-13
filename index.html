@@ -4,6 +4,11 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Arcane Almanac — 記録と予定の手帖</title>
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#8A6A1C" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Arcane Almanac" />
+<link rel="apple-touch-icon" href="/icon.svg" />
 
 <!-- ============================================================
   React + Babel をCDNから読み込む(初回はインターネット接続が必要)。
@@ -22,6 +27,12 @@
   body { margin: 0; background: #EFEAE0; }
   input, textarea, button { font: inherit; }
   ::placeholder { color: #A39A86; }
+  @keyframes todoFadeUp {
+    0%   { opacity: 0; transform: translate(-50%, -30%); }
+    15%  { opacity: 1; transform: translate(-50%, -50%); }
+    70%  { opacity: 1; transform: translate(-50%, -60%); }
+    100% { opacity: 0; transform: translate(-50%, -80%); }
+  }
 </style>
 </head>
 <body>
@@ -404,6 +415,37 @@ const scenarioStore = {
     catch (e) { alert("保存に失敗しました: " + e.message); }
   },
 };
+
+/* ---------- TODO リストの保存 ---------- */
+const TODO_KEY = "coc-todos";
+const TODO_STATS_KEY = "coc-todo-stats";
+const todoStore = {
+  load() { try { return JSON.parse(localStorage.getItem(TODO_KEY) || "[]"); } catch (e) { return []; } },
+  save(list) { try { localStorage.setItem(TODO_KEY, JSON.stringify(list)); } catch (e) {} },
+};
+const todoStatsStore = {
+  load() { try { return JSON.parse(localStorage.getItem(TODO_STATS_KEY) || "{}"); } catch (e) { return {}; } },
+  save(v) { try { localStorage.setItem(TODO_STATS_KEY, JSON.stringify(v)); } catch (e) {} },
+};
+const TODO_CATEGORIES = ["日常", "創作", "TRPG", "その他"];
+const TODO_CAT_COLORS = { "日常": "#4A7C59", "創作": "#7B4FA0", "TRPG": "#8A6A1C", "その他": "#6E675A" };
+const TODO_LEVELS = [
+  { min: 0,    lv: 1, label: "平凡な市民" },
+  { min: 100,  lv: 2, label: "見習い探索者" },
+  { min: 250,  lv: 3, label: "一人前探索者" },
+  { min: 500,  lv: 4, label: "熟練探索者" },
+  { min: 1000, lv: 5, label: "古代の知識者" },
+  { min: 2000, lv: 6, label: "神話の語り手" },
+];
+function getTodoLevelInfo(pts) {
+  let info = TODO_LEVELS[0];
+  for (const l of TODO_LEVELS) { if (pts >= l.min) info = l; }
+  const nextIdx = TODO_LEVELS.findIndex(l => l.lv === info.lv + 1);
+  const next = nextIdx >= 0 ? TODO_LEVELS[nextIdx] : null;
+  const progress = next ? Math.min((pts - info.min) / (next.min - info.min), 1) : 1;
+  return { ...info, next, progress, pts };
+}
+const blankTodo = (cat) => ({ id: Date.now().toString() + Math.random().toString(36).slice(2), title: "", category: cat || "日常", done: false, doneAt: null, createdAt: new Date().toISOString() });
 
 const SCENARIO_STATUSES = ["積み", "未プレイ", "プレイ中", "プレイ済", "GM用"];
 const SCENARIO_STATUS_COLORS = {
@@ -857,6 +899,17 @@ function App() {
   const [scFilter, setScFilter] = useState("");
   const persistScenarios = (list) => { setScenarios(list); scenarioStore.save(list); };
 
+  /* TODO リスト */
+  const [todos, setTodos] = useState(() => todoStore.load());
+  const [todoStats, setTodoStats] = useState(() => ({ totalPoints: 0, ...todoStatsStore.load() }));
+  const [todoCatFilter, setTodoCatFilter] = useState("all");
+  const [todoShowDone, setTodoShowDone] = useState(false);
+  const [todoDraftTitle, setTodoDraftTitle] = useState("");
+  const [todoDraftCat, setTodoDraftCat] = useState("日常");
+  const [todoPointPop, setTodoPointPop] = useState(null);
+  const persistTodos = (list) => { setTodos(list); todoStore.save(list); };
+  const persistTodoStats = (v) => { setTodoStats(v); todoStatsStore.save(v); };
+
   const saveJournal = () => {
     if (!jDraft || (!jDraft.date && !jDraft.scenario.trim())) return;
     const e = { ...jDraft, updatedAt: Date.now() };
@@ -891,6 +944,8 @@ function App() {
         if (Array.isArray(data.posts)) { setPosts(data.posts); postStore.save(data.posts); }
         if (Array.isArray(data.memos)) { setMemos(data.memos); memoStore.save(data.memos); }
         if (Array.isArray(data.scenarios)) { setScenarios(data.scenarios); scenarioStore.save(data.scenarios); }
+        if (Array.isArray(data.todos)) { setTodos(data.todos); todoStore.save(data.todos); }
+        if (data.todoStats) { const s = { totalPoints: 0, ...data.todoStats }; setTodoStats(s); todoStatsStore.save(s); }
       }
       setSyncStatus("ok");
       hydratedRef.current = true;
@@ -907,12 +962,12 @@ function App() {
     if (pushTimer.current) clearTimeout(pushTimer.current);
     setSyncStatus("syncing");
     pushTimer.current = setTimeout(() => {
-      cloud.push({ characters, events, journal, watch, posts, memos, scenarios })
+      cloud.push({ characters, events, journal, watch, posts, memos, scenarios, todos, todoStats })
         .then((ok) => setSyncStatus(ok ? "ok" : "error"))
         .catch((e) => { console.error(e); setSyncStatus("error"); });
     }, 1200);
     return () => { if (pushTimer.current) clearTimeout(pushTimer.current); };
-  }, [characters, events, journal, watch, posts, memos, scenarios, syncCode]);
+  }, [characters, events, journal, watch, posts, memos, scenarios, todos, todoStats, syncCode]);
 
   const applySyncCode = (code) => {
     const c = code.trim();
@@ -931,6 +986,8 @@ function App() {
         if (Array.isArray(data.posts)) { setPosts(data.posts); postStore.save(data.posts); }
         if (Array.isArray(data.memos)) { setMemos(data.memos); memoStore.save(data.memos); }
         if (Array.isArray(data.scenarios)) { setScenarios(data.scenarios); scenarioStore.save(data.scenarios); }
+        if (Array.isArray(data.todos)) { setTodos(data.todos); todoStore.save(data.todos); }
+        if (data.todoStats) { const s = { totalPoints: 0, ...data.todoStats }; setTodoStats(s); todoStatsStore.save(s); }
         setSyncStatus("ok");
       } else { setSyncStatus("ok"); }
     }).catch((e) => { console.error(e); setSyncStatus("error"); });
@@ -1164,6 +1221,7 @@ function App() {
             {navItem("watch", "▶", "視聴リスト")}
             {navItem("memo", "📝", "クイックメモ")}
             {navItem("scenario", "📚", "シナリオ管理")}
+            {navItem("todo", "☑", "TODO")}
             {isMobile && (
               <div onClick={() => setSyncOpen(true)}
                 style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 10px", cursor: "pointer", flex: "1 0 auto", minWidth: 64, color: syncStatus === "ok" ? T.green : syncStatus === "error" ? T.red : T.dim, fontFamily: serif, fontSize: 11 }}>
@@ -2402,6 +2460,117 @@ function App() {
           </div>
         )}
 
+        {/* ===== TODO リスト ===== */}
+        {view === "todo" && (() => {
+          const lvInfo = getTodoLevelInfo(todoStats.totalPoints || 0);
+          const addTodo = () => {
+            if (!todoDraftTitle.trim()) return;
+            persistTodos([{ ...blankTodo(todoDraftCat), title: todoDraftTitle.trim() }, ...todos]);
+            setTodoDraftTitle("");
+          };
+          const toggleTodo = (id) => {
+            const todo = todos.find(t => t.id === id);
+            if (!todo) return;
+            const completing = !todo.done;
+            persistTodos(todos.map(t => t.id === id ? { ...t, done: !t.done, doneAt: !t.done ? new Date().toISOString() : null } : t));
+            if (completing) {
+              const pts = 10;
+              const oldLv = getTodoLevelInfo(todoStats.totalPoints || 0).lv;
+              const newTotal = (todoStats.totalPoints || 0) + pts;
+              const newStats = { ...todoStats, totalPoints: newTotal };
+              const newLvInfo = getTodoLevelInfo(newTotal);
+              persistTodoStats(newStats);
+              setTodoPointPop({ pts, lvUp: newLvInfo.lv > oldLv, lvLabel: newLvInfo.label });
+              setTimeout(() => setTodoPointPop(null), 2500);
+            }
+          };
+          const deleteTodo = (id) => persistTodos(todos.filter(t => t.id !== id));
+          const doneCount = todos.filter(t => t.done).length;
+          const filtered = todos.filter(t => {
+            if (!todoShowDone && t.done) return false;
+            if (todoCatFilter !== "all" && t.category !== todoCatFilter) return false;
+            return true;
+          });
+          return (
+            <div style={{ position: "relative" }}>
+              {/* ポイントポップアップ */}
+              {todoPointPop && (
+                <div style={{ position: "fixed", top: "38%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 9999, textAlign: "center", pointerEvents: "none", animation: "todoFadeUp 2.5s forwards" }}>
+                  <div style={{ fontFamily: mono, fontSize: 36, color: T.gold, fontWeight: "bold", textShadow: "0 2px 12px rgba(0,0,0,0.25)" }}>+{todoPointPop.pts} pt</div>
+                  {todoPointPop.lvUp && (
+                    <div style={{ fontFamily: serif, fontSize: 17, color: "#2E8B57", marginTop: 8, fontWeight: "bold" }}>⬆ Lv UP！{todoPointPop.lvLabel}</div>
+                  )}
+                </div>
+              )}
+
+              {/* レベル表示 */}
+              <div style={{ background: T.cardBg, border: `1px solid ${T.line}`, borderLeft: `4px solid ${T.gold}`, borderRadius: 4, padding: "12px 16px", marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <div>
+                    <span style={{ fontFamily: mono, fontSize: 11, color: T.gold, letterSpacing: 1 }}>Lv.{lvInfo.lv}</span>
+                    <span style={{ fontFamily: serif, fontSize: 15, fontWeight: "bold", color: T.text, marginLeft: 8 }}>{lvInfo.label}</span>
+                  </div>
+                  <span style={{ fontFamily: mono, fontSize: 13, color: T.gold }}>{lvInfo.pts} pt</span>
+                </div>
+                {lvInfo.next ? (
+                  <div>
+                    <div style={{ background: T.line, borderRadius: 4, height: 7, overflow: "hidden" }}>
+                      <div style={{ background: T.gold, height: "100%", width: `${lvInfo.progress * 100}%`, transition: "width 0.6s ease", borderRadius: 4 }} />
+                    </div>
+                    <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, marginTop: 4, textAlign: "right" }}>次のレベルまで {lvInfo.next.min - lvInfo.pts} pt</div>
+                  </div>
+                ) : (
+                  <div style={{ fontFamily: mono, fontSize: 11, color: T.gold, marginTop: 4, textAlign: "center", letterSpacing: 2 }}>★ 最高レベル達成 ★</div>
+                )}
+              </div>
+
+              {/* 追加フォーム */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                <input value={todoDraftTitle} onChange={e => setTodoDraftTitle(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && addTodo()}
+                  placeholder="新しいTODOを入力… (Enterで追加)"
+                  style={{ ...inputStyle, flex: 1, minWidth: 160 }} />
+                <select value={todoDraftCat} onChange={e => setTodoDraftCat(e.target.value)} style={{ ...inputStyle, width: "auto" }}>
+                  {TODO_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                </select>
+                <Btn onClick={addTodo} color={T.green} border={T.green} small>追加</Btn>
+              </div>
+
+              {/* カテゴリフィルタ */}
+              <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+                {["all", ...TODO_CATEGORIES].map(cat => (
+                  <button key={cat} onClick={() => setTodoCatFilter(cat)}
+                    style={{ fontFamily: mono, fontSize: 10, padding: "3px 10px", borderRadius: 12, border: `1px solid ${todoCatFilter === cat ? T.gold : T.line}`, background: todoCatFilter === cat ? T.gold : "transparent", color: todoCatFilter === cat ? "#fff" : T.dim, cursor: "pointer" }}>
+                    {cat === "all" ? "すべて" : cat}
+                  </button>
+                ))}
+                <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+                  <label style={{ fontFamily: mono, fontSize: 10, color: T.dim, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+                    <input type="checkbox" checked={todoShowDone} onChange={e => setTodoShowDone(e.target.checked)} />完了済みを表示
+                  </label>
+                  {doneCount > 0 && (
+                    <Btn small color={T.dim} border={T.line} onClick={() => persistTodos(todos.filter(t => !t.done))}>完了済みを削除 ({doneCount})</Btn>
+                  )}
+                </div>
+              </div>
+
+              {/* TODOリスト */}
+              {filtered.length === 0 && (
+                <div style={{ fontFamily: serif, fontSize: 13, color: T.dim, textAlign: "center", padding: "40px 0", fontStyle: "italic" }}>TODOはありません</div>
+              )}
+              {filtered.map(todo => (
+                <div key={todo.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", marginBottom: 6, background: todo.done ? "transparent" : T.cardBg, border: `1px solid ${T.line}`, borderLeft: `3px solid ${TODO_CAT_COLORS[todo.category] || T.dim}`, borderRadius: 4, opacity: todo.done ? 0.5 : 1, transition: "opacity 0.2s" }}>
+                  <input type="checkbox" checked={todo.done} onChange={() => toggleTodo(todo.id)}
+                    style={{ width: 16, height: 16, cursor: "pointer", accentColor: T.gold, flexShrink: 0 }} />
+                  <span style={{ flex: 1, fontFamily: serif, fontSize: 14, color: T.text, textDecoration: todo.done ? "line-through" : "none" }}>{todo.title}</span>
+                  <span style={{ fontFamily: mono, fontSize: 9, color: "#fff", background: TODO_CAT_COLORS[todo.category] || T.dim, padding: "1px 7px", borderRadius: 8, flexShrink: 0 }}>{todo.category}</span>
+                  <button onClick={() => deleteTodo(todo.id)} style={{ fontFamily: mono, fontSize: 13, color: T.dim, background: "none", border: "none", cursor: "pointer", padding: "0 4px", flexShrink: 0 }}>×</button>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+
         {/* ===== 編集 ===== */}
         {view === "edit" && draft && (
           <div>
@@ -2742,6 +2911,10 @@ function App() {
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+}
 </script>
 </body>
 </html>
