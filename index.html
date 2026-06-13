@@ -1,0 +1,2349 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Arcane Almanac — 記録と予定の手帖</title>
+
+<!-- ============================================================
+  React + Babel をCDNから読み込む(初回はインターネット接続が必要)。
+  完全オフラインで使いたい場合は、以下3つのURLをブラウザで開いて
+  「名前を付けて保存」し、このHTMLと同じフォルダに置いたうえで
+  src="react.production.min.js" のように書き換えてください。
+============================================================ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<style>
+  body { margin: 0; background: #EFEAE0; }
+  input, textarea, button { font: inherit; }
+  ::placeholder { color: #A39A86; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="env,react">
+/* ============================================================
+   クトゥルフ神話TRPG 探索者管理ツール v3(単一HTML版)
+   ------------------------------------------------------------
+   v3での変更点:
+   - 保存先を localStorage に変更(このブラウザ内に保存される)
+   - バックアップのJSONファイル書き出し/読み込み
+   - 誕生日の .ics 書き出し & Googleカレンダー追加リンク
+   - 明るい配色(資料館の紙のイメージ)に変更
+   ============================================================ */
+
+const { useState, useEffect, useRef } = React;
+
+/* ---------- 配色(紙のアーカイブ・高コントラスト) ---------- */
+const T = {
+  bg: "#EFEAE0",      // 背景: 明るい生成り
+  panel: "#FAF7EF",   // パネル
+  panel2: "#FFFFFF",  // 入力欄
+  line: "#CFC6B2",    // 罫線
+  paper: "#2E2A23",   // 本文(濃いインク色)
+  dim: "#6E675A",     // 補助テキスト
+  gold: "#8A6A1C",    // アクセント(真鍮色)
+  green: "#1F7A4D",   // 肯定的アクション
+  red: "#B0432F",     // 危険・SAN
+};
+const serif = '"Georgia", "Times New Roman", "Hiragino Mincho ProN", "Yu Mincho", serif';
+const mono = '"Courier New", monospace';
+const num = (v) => Number(v) || 0;
+const normName = (s) => String(s).replace(/（/g, "(").replace(/）/g, ")").trim();
+const pad2 = (n) => String(n).padStart(2, "0");
+
+/* ---------- ルールセット(6版) ---------- */
+const RULESETS = {
+  "6e": {
+    label: "第6版",
+    abilities: [
+      { key: "STR", name: "筋力", dice: { n: 3, d: 6, add: 0 }, hint: "3D6" },
+      { key: "CON", name: "体力", dice: { n: 3, d: 6, add: 0 }, hint: "3D6" },
+      { key: "POW", name: "精神力", dice: { n: 3, d: 6, add: 0 }, hint: "3D6" },
+      { key: "DEX", name: "敏捷性", dice: { n: 3, d: 6, add: 0 }, hint: "3D6" },
+      { key: "APP", name: "外見", dice: { n: 3, d: 6, add: 0 }, hint: "3D6" },
+      { key: "SIZ", name: "体格", dice: { n: 2, d: 6, add: 6 }, hint: "2D6+6" },
+      { key: "INT", name: "知性", dice: { n: 2, d: 6, add: 6 }, hint: "2D6+6" },
+      { key: "EDU", name: "教育", dice: { n: 3, d: 6, add: 3 }, hint: "3D6+3" },
+    ],
+    derive(ab) {
+      const v = (k) => num(ab[k]);
+      const sum = v("STR") + v("SIZ");
+      const db =
+        sum <= 12 ? "-1D6" : sum <= 16 ? "-1D4" : sum <= 24 ? "±0" :
+        sum <= 32 ? "+1D4" : sum <= 40 ? "+1D6" : sum <= 56 ? "+2D6" : "+3D6";
+      return [
+        { key: "HP", name: "耐久力", value: Math.ceil((v("CON") + v("SIZ")) / 2) },
+        { key: "MP", name: "MP", value: v("POW") },
+        { key: "SAN", name: "正気度", value: v("POW") * 5 },
+        { key: "IDEA", name: "アイデア", value: v("INT") * 5 },
+        { key: "LUCK", name: "幸運", value: v("POW") * 5 },
+        { key: "KNOW", name: "知識", value: Math.min(v("EDU") * 5, 99) },
+        { key: "DB", name: "ダメージB", value: db },
+        { key: "JOB", name: "職業P", value: v("EDU") * 20 },
+        { key: "HOB", name: "興味P", value: v("INT") * 10 },
+      ];
+    },
+    skillCategories: [
+      { name: "戦闘技能", skills: [
+        { n: "回避", init: (a) => num(a.DEX) * 2 },
+        { n: "こぶし(パンチ)", init: 50 }, { n: "キック", init: 25 },
+        { n: "組み付き", init: 25 }, { n: "頭突き", init: 10 },
+        { n: "投擲", init: 25 }, { n: "マーシャルアーツ", init: 1 },
+        { n: "拳銃", init: 20 }, { n: "サブマシンガン", init: 15 },
+        { n: "ショットガン", init: 30 }, { n: "マシンガン", init: 15 },
+        { n: "ライフル", init: 25 },
+      ]},
+      { name: "探索技能", skills: [
+        { n: "応急手当", init: 30 }, { n: "鍵開け", init: 1 },
+        { n: "隠す", init: 15 }, { n: "隠れる", init: 10 },
+        { n: "聞き耳", init: 25 }, { n: "忍び歩き", init: 10 },
+        { n: "写真術", init: 10 }, { n: "精神分析", init: 1 },
+        { n: "追跡", init: 10 }, { n: "登攀", init: 40 },
+        { n: "図書館", init: 25 }, { n: "目星", init: 25 },
+      ]},
+      { name: "行動技能", skills: [
+        { n: "運転", init: 20 }, { n: "機械修理", init: 20 },
+        { n: "重機械操作", init: 1 }, { n: "乗馬", init: 5 },
+        { n: "水泳", init: 25 }, { n: "製作", init: 5 },
+        { n: "操縦", init: 1 }, { n: "跳躍", init: 25 },
+        { n: "電気修理", init: 10 }, { n: "ナビゲート", init: 10 },
+        { n: "変装", init: 1 },
+      ]},
+      { name: "交渉技能", skills: [
+        { n: "言いくるめ", init: 5 }, { n: "信用", init: 15 },
+        { n: "説得", init: 15 }, { n: "値切り", init: 5 },
+        { n: "母国語", init: (a) => Math.min(num(a.EDU) * 5, 99) },
+        { n: "ほかの言語", init: 1 },
+      ]},
+      { name: "知識技能", skills: [
+        { n: "医学", init: 5 }, { n: "オカルト", init: 5 },
+        { n: "化学", init: 1 }, { n: "クトゥルフ神話", init: 0 },
+        { n: "芸術", init: 5 }, { n: "経理", init: 10 },
+        { n: "考古学", init: 1 }, { n: "コンピューター", init: 1 },
+        { n: "心理学", init: 5 }, { n: "人類学", init: 1 },
+        { n: "生物学", init: 1 }, { n: "地質学", init: 1 },
+        { n: "電子工学", init: 1 }, { n: "天文学", init: 1 },
+        { n: "博物学", init: 10 }, { n: "物理学", init: 1 },
+        { n: "法律", init: 5 }, { n: "薬学", init: 1 },
+        { n: "歴史", init: 20 },
+      ]},
+    ],
+  },
+  "7e": {
+    label: "第7版",
+    abilities: [
+      { key: "STR", name: "筋力", dice: { n: 3, d: 6, add: 0, mult: 5 }, hint: "3D6×5" },
+      { key: "CON", name: "体力", dice: { n: 3, d: 6, add: 0, mult: 5 }, hint: "3D6×5" },
+      { key: "POW", name: "精神力", dice: { n: 3, d: 6, add: 0, mult: 5 }, hint: "3D6×5" },
+      { key: "DEX", name: "敏捷性", dice: { n: 3, d: 6, add: 0, mult: 5 }, hint: "3D6×5" },
+      { key: "APP", name: "外見", dice: { n: 3, d: 6, add: 0, mult: 5 }, hint: "3D6×5" },
+      { key: "SIZ", name: "体格", dice: { n: 2, d: 6, add: 6, mult: 5 }, hint: "(2D6+6)×5" },
+      { key: "INT", name: "知性", dice: { n: 2, d: 6, add: 6, mult: 5 }, hint: "(2D6+6)×5" },
+      { key: "EDU", name: "教育", dice: { n: 2, d: 6, add: 6, mult: 5 }, hint: "(2D6+6)×5" },
+      { key: "LUK", name: "幸運", dice: { n: 3, d: 6, add: 0, mult: 5 }, hint: "3D6×5" },
+    ],
+    derive(ab) {
+      const v = (k) => num(ab[k]);
+      const sum = v("STR") + v("SIZ");
+      let db = "±0", build = 0;
+      if (sum <= 64) { db = "-2"; build = -2; }
+      else if (sum <= 84) { db = "-1"; build = -1; }
+      else if (sum <= 124) { db = "±0"; build = 0; }
+      else if (sum <= 164) { db = "+1D4"; build = 1; }
+      else if (sum <= 204) { db = "+1D6"; build = 2; }
+      else { db = "+2D6"; build = 3; }
+      const mov =
+        v("STR") < v("SIZ") && v("DEX") < v("SIZ") ? 7 :
+        v("STR") > v("SIZ") && v("DEX") > v("SIZ") ? 9 : 8;
+      return [
+        { key: "HP", name: "耐久力", value: Math.floor((v("CON") + v("SIZ")) / 10) },
+        { key: "MP", name: "MP", value: Math.floor(v("POW") / 5) },
+        { key: "SAN", name: "正気度", value: v("POW") },
+        { key: "IDEA", name: "アイデア", value: v("INT") },
+        { key: "KNOW", name: "知識", value: v("EDU") },
+        { key: "DB", name: "ダメージB", value: db },
+        { key: "BUILD", name: "ビルド", value: build },
+        { key: "MOV", name: "移動率", value: mov },
+        { key: "JOB", name: "職業P目安", value: v("EDU") * 4 },
+        { key: "HOB", name: "興味P", value: v("INT") * 2 },
+      ];
+    },
+    /* 専門分野つき技能(科学(化学)等)は「固有・追加技能」で追加してください */
+    skillCategories: [
+      { name: "戦闘技能", skills: [
+        { n: "回避", init: (a) => Math.floor(num(a.DEX) / 2) },
+        { n: "近接戦闘(格闘)", init: 25 }, { n: "投擲", init: 20 },
+        { n: "射撃(拳銃)", init: 20 }, { n: "射撃(ライフル/ショットガン)", init: 25 },
+      ]},
+      { name: "探索技能", skills: [
+        { n: "応急手当", init: 30 }, { n: "医学", init: 1 },
+        { n: "鍵開け", init: 1 }, { n: "隠密", init: 20 },
+        { n: "聞き耳", init: 20 }, { n: "図書館", init: 20 },
+        { n: "目星", init: 25 }, { n: "追跡", init: 10 },
+        { n: "登攀", init: 20 }, { n: "精神分析", init: 1 },
+        { n: "鑑定", init: 5 },
+      ]},
+      { name: "行動技能", skills: [
+        { n: "運転(自動車)", init: 20 }, { n: "機械修理", init: 10 },
+        { n: "電気修理", init: 10 }, { n: "重機械操作", init: 1 },
+        { n: "操縦", init: 1 }, { n: "乗馬", init: 5 },
+        { n: "水泳", init: 20 }, { n: "跳躍", init: 20 },
+        { n: "ナビゲート", init: 10 }, { n: "サバイバル", init: 10 },
+        { n: "変装", init: 5 }, { n: "手さばき", init: 10 },
+        { n: "芸術/製作", init: 5 },
+      ]},
+      { name: "交渉技能", skills: [
+        { n: "言いくるめ", init: 5 }, { n: "信用", init: 0 },
+        { n: "威圧", init: 15 }, { n: "魅惑", init: 15 },
+        { n: "説得", init: 10 },
+        { n: "母国語", init: (a) => num(a.EDU) },
+        { n: "ほかの言語", init: 1 },
+      ]},
+      { name: "知識技能", skills: [
+        { n: "経理", init: 5 }, { n: "人類学", init: 1 },
+        { n: "考古学", init: 1 }, { n: "クトゥルフ神話", init: 0 },
+        { n: "コンピューター", init: 5 }, { n: "電子工学", init: 1 },
+        { n: "歴史", init: 5 }, { n: "法律", init: 5 },
+        { n: "自然", init: 10 }, { n: "オカルト", init: 5 },
+        { n: "心理学", init: 10 }, { n: "科学", init: 1 },
+      ]},
+    ],
+  },
+};
+
+const skillInit = (def, ab) => (typeof def.init === "function" ? def.init(ab) : def.init);
+const masterSkillNames = (rs) =>
+  rs.skillCategories.flatMap((c) => c.skills.map((s) => normName(s.n)));
+
+const roll = ({ n, d, add, mult }) => {
+  let s = add;
+  for (let i = 0; i < n; i++) s += 1 + Math.floor(Math.random() * d);
+  return s * (mult || 1);
+};
+
+/* ---------- データモデル ---------- */
+const blankProfile = () => ({
+  height: "", weight: "", hair: "", eyes: "",
+  firstPerson: "", speech: "", personality: "",
+  likes: "", dislikes: "", belief: "", relations: "",
+});
+
+const blankCharacter = () => ({
+  id: "inv-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+  edition: "6e",
+  name: "", occupation: "", age: "", gender: "", origin: "",
+  abilities: { STR: "", CON: "", POW: "", DEX: "", APP: "", SIZ: "", INT: "", EDU: "", LUK: "" },
+  skills: {},
+  current: { HP: "", MP: "", SAN: "" },
+  iconUrl: "", externalUrl: "", color: "#d4a017",
+  birthday: { month: "", day: "" },
+  contacts: [],
+  sessions: [],
+  profile: blankProfile(),
+  backstory: "", items: "", memo: "",
+  updatedAt: Date.now(),
+});
+
+const normalizeCharacter = (c) => ({
+  ...blankCharacter(), ...c,
+  abilities: { ...blankCharacter().abilities, ...(c.abilities || {}) },
+  skills: c.skills || {},
+  current: { HP: "", MP: "", SAN: "", ...(c.current || {}) },
+  birthday: { month: "", day: "", ...(c.birthday || {}) },
+  contacts: c.contacts || [],
+  sessions: c.sessions || [],
+  profile: { ...blankProfile(), ...(c.profile || {}) },
+});
+
+/* ============================================================
+   クラウド同期(Firebase Firestore)
+   ------------------------------------------------------------
+   同期コード(合言葉)を1つのドキュメント名として使い、
+   PC・スマホで同じコードを入れれば同じデータを共有できる。
+   localStorageにも常に保存するので、オフラインでも動作する。
+   ============================================================ */
+const firebaseConfig = {
+  apiKey: "AIzaSyAPtHmHZGUGsG3BDSWv3SH2gOzqG7VWQ-g",
+  authDomain: "tansakusha-doki-soraho.firebaseapp.com",
+  projectId: "tansakusha-doki-soraho",
+  storageBucket: "tansakusha-doki-soraho.firebasestorage.app",
+  messagingSenderId: "541743323696",
+  appId: "1:541743323696:web:66a212128caf807c446bf5",
+};
+
+let _db = null;
+function getDB() {
+  if (_db) return _db;
+  try {
+    if (!window.firebase || !firebase.firestore) return null;
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    _db = firebase.firestore();
+    return _db;
+  } catch (e) { console.error("Firebase初期化に失敗", e); return null; }
+}
+
+const SYNC_CODE_KEY = "coc-sync-code";
+const cloud = {
+  getCode() { return localStorage.getItem(SYNC_CODE_KEY) || ""; },
+  setCode(code) {
+    if (code) localStorage.setItem(SYNC_CODE_KEY, code);
+    else localStorage.removeItem(SYNC_CODE_KEY);
+  },
+  /* クラウドへ全データを書き込む */
+  async push(payload) {
+    const db = getDB(); const code = this.getCode();
+    if (!db || !code) return false;
+    await db.collection("almanac").doc(code).set({
+      ...payload, updatedAt: Date.now(),
+    });
+    return true;
+  },
+  /* クラウドから全データを読み込む(なければnull) */
+  async pull() {
+    const db = getDB(); const code = this.getCode();
+    if (!db || !code) return null;
+    const snap = await db.collection("almanac").doc(code).get();
+    return snap.exists ? snap.data() : null;
+  },
+};
+
+/* ---------- 保存(localStorage: このブラウザ内に保存される) ---------- */
+const STORAGE_KEY = "coc-characters";
+const store = {
+  load() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]").map(normalizeCharacter); }
+    catch (e) { return []; }
+  },
+  save(list) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); }
+    catch (e) { alert("保存に失敗しました: " + e.message); }
+  },
+};
+
+/* ---------- 予定(配信・楽しみなこと等)の保存 ---------- */
+const EVENTS_KEY = "coc-events";
+const eventStore = {
+  load() {
+    try { return JSON.parse(localStorage.getItem(EVENTS_KEY) || "[]"); }
+    catch (e) { return []; }
+  },
+  save(list) {
+    try { localStorage.setItem(EVENTS_KEY, JSON.stringify(list)); }
+    catch (e) { alert("保存に失敗しました: " + e.message); }
+  },
+};
+
+/* ---------- セッション日誌の保存 ---------- */
+const JOURNAL_KEY = "coc-journal";
+const journalStore = {
+  load() {
+    try { return JSON.parse(localStorage.getItem(JOURNAL_KEY) || "[]"); }
+    catch (e) { return []; }
+  },
+  save(list) {
+    try { localStorage.setItem(JOURNAL_KEY, JSON.stringify(list)); }
+    catch (e) { alert("保存に失敗しました: " + e.message); }
+  },
+};
+
+/* ---------- 視聴リスト(YouTube)の保存 ---------- */
+const WATCH_KEY = "coc-watch";
+const watchStore = {
+  load() {
+    try { return JSON.parse(localStorage.getItem(WATCH_KEY) || "[]"); }
+    catch (e) { return []; }
+  },
+  save(list) {
+    try { localStorage.setItem(WATCH_KEY, JSON.stringify(list)); }
+    catch (e) { alert("保存に失敗しました: " + e.message); }
+  },
+};
+
+/* ---------- ポスト集(X / Twitter)の保存 ---------- */
+const POSTS_KEY = "coc-posts";
+const postStore = {
+  load() {
+    try { return JSON.parse(localStorage.getItem(POSTS_KEY) || "[]"); }
+    catch (e) { return []; }
+  },
+  save(list) {
+    try { localStorage.setItem(POSTS_KEY, JSON.stringify(list)); }
+    catch (e) { alert("保存に失敗しました: " + e.message); }
+  },
+};
+
+/* URLの種類に応じたリンク表示ラベルを返す */
+function linkLabel(url) {
+  const u = String(url).toLowerCase();
+  if (/discord\.(gg|com)/.test(u)) return "💬 Discord";
+  if (/youtube\.com|youtu\.be/.test(u)) return "▶ YouTube";
+  if (/twitch\.tv/.test(u)) return "🎮 Twitch";
+  if (/x\.com|twitter\.com/.test(u)) return "✕ ポスト";
+  return "リンク ↗";
+}
+
+/* XのポストURLを正規化(twitter.com / x.com 両対応) */
+function parseXPost(url) {
+  const u = String(url).trim();
+  const m = u.match(/(?:twitter\.com|x\.com)\/([^/]+)\/status\/(\d+)/);
+  if (!m) return null;
+  return { user: m[1], statusId: m[2], canonical: `https://x.com/${m[1]}/status/${m[2]}` };
+}
+
+/* YouTubeのURLから埋め込み情報を取り出す(動画・再生リスト両対応) */
+function parseYouTube(url) {
+  const u = String(url).trim();
+  let videoId = "", listId = "";
+  const list = u.match(/[?&]list=([\w-]+)/);
+  if (list) listId = list[1];
+  let m = u.match(/[?&]v=([\w-]{11})/) || u.match(/youtu\.be\/([\w-]{11})/) ||
+          u.match(/youtube\.com\/embed\/([\w-]{11})/) || u.match(/shorts\/([\w-]{11})/);
+  if (m) videoId = m[1];
+  if (!videoId && !listId && /^[\w-]{11}$/.test(u)) videoId = u; // 動画IDだけ貼られた場合
+  if (!videoId && !listId) return null;
+  const embed = listId
+    ? `https://www.youtube.com/embed/${videoId || "videoseries"}?list=${listId}`
+    : `https://www.youtube.com/embed/${videoId}`;
+  const thumb = videoId ? `https://img.youtube.com/vi/${videoId}/mqdefault.jpg` : "";
+  return { videoId, listId, embed, thumb };
+}
+
+const blankJournalEntry = () => ({
+  id: "j" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+  date: "", scenario: "", characterId: "",
+  party: "", ending: "", aftermath: "", memo: "",
+  updatedAt: Date.now(),
+});
+
+const EVENT_CATS = {
+  "配信": "#7B4FA0",
+  "楽しみ": "#1F7A4D",
+  "TRPG": "#8A6A1C",
+  "その他": "#6E675A",
+};
+
+const ymdStr = (dt) => `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+/* "YYYY-MM-DD" を確実にローカル日付として解釈(UTCずれ防止) */
+const parseYMD = (s) => {
+  const [y, m, d] = String(s).split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
+};
+
+/* その予定が指定の日に発生するか(繰り返し対応) */
+function eventOccursOn(ev, dt) {
+  if (!ev.date) return false;
+  const [y, m, d] = ev.date.split("-").map(Number);
+  /* 期間(終了日)つきの予定: 開始〜終了の全日に表示(繰り返しなしのみ) */
+  if (ev.endDate && (!ev.repeat || ev.repeat === "none")) {
+    const s = new Date(y, m - 1, d); s.setHours(0, 0, 0, 0);
+    const [y2, m2, d2] = ev.endDate.split("-").map(Number);
+    const e = new Date(y2, m2 - 1, d2); e.setHours(0, 0, 0, 0);
+    const cur = new Date(dt); cur.setHours(0, 0, 0, 0);
+    return cur >= s && cur <= e;
+  }
+  if (ev.repeat === "weekly") {
+    const start = new Date(y, m - 1, d); start.setHours(0, 0, 0, 0);
+    const cur = new Date(dt); cur.setHours(0, 0, 0, 0);
+    return cur >= start && cur.getDay() === start.getDay();
+  }
+  if (ev.repeat === "yearly") return dt.getMonth() + 1 === m && dt.getDate() === d;
+  return ymdStr(dt) === ev.date;
+}
+
+/* ---------- ファイルのダウンロード ---------- */
+function download(filename, text, mime) {
+  const blob = new Blob([text], { type: mime });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/* ---------- 誕生日+予定 → カレンダー連携(.ics) ---------- */
+function buildICS(chars, events) {
+  const year = new Date().getFullYear();
+  const out = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//CoC Character Manager//JP"];
+  chars
+    .filter((c) => num(c.birthday.month) >= 1 && num(c.birthday.day) >= 1)
+    .forEach((c) => {
+      const d = `${year}${pad2(num(c.birthday.month))}${pad2(num(c.birthday.day))}`;
+      out.push(
+        "BEGIN:VEVENT",
+        `UID:${c.id}@coc-character-manager`,
+        `DTSTART;VALUE=DATE:${d}`,
+        "RRULE:FREQ=YEARLY",
+        `SUMMARY:🎂 ${(c.name || "探索者")} の誕生日`,
+        "END:VEVENT"
+      );
+    });
+  (events || [])
+    .filter((ev) => ev.date && ev.title)
+    .forEach((ev) => {
+      const d = ev.date.replace(/-/g, "");
+      out.push("BEGIN:VEVENT", `UID:${ev.id}@coc-character-manager`);
+      if (ev.time) out.push(`DTSTART:${d}T${ev.time.replace(":", "")}00`);
+      else out.push(`DTSTART;VALUE=DATE:${d}`);
+      if (ev.endDate && !ev.time && (!ev.repeat || ev.repeat === "none")) {
+        const [ey, em, ed] = ev.endDate.split("-").map(Number);
+        const next = new Date(ey, em - 1, ed + 1); // 終日予定のDTENDは翌日指定
+        out.push(`DTEND;VALUE=DATE:${next.getFullYear()}${pad2(next.getMonth() + 1)}${pad2(next.getDate())}`);
+      }
+      if (ev.repeat === "weekly") out.push("RRULE:FREQ=WEEKLY");
+      if (ev.repeat === "yearly") out.push("RRULE:FREQ=YEARLY");
+      out.push(`SUMMARY:[${ev.cat}] ${ev.title}`, "END:VEVENT");
+    });
+  out.push("END:VCALENDAR");
+  return out.join("\r\n");
+}
+
+function googleCalendarUrl(c) {
+  const year = new Date().getFullYear();
+  const m = num(c.birthday.month), d = num(c.birthday.day);
+  const start = new Date(year, m - 1, d);
+  const end = new Date(year, m - 1, d + 1);
+  const fmt = (dt) => `${dt.getFullYear()}${pad2(dt.getMonth() + 1)}${pad2(dt.getDate())}`;
+  const p = new URLSearchParams({
+    action: "TEMPLATE",
+    text: `🎂 ${(c.name || "探索者")} の誕生日`,
+    dates: `${fmt(start)}/${fmt(end)}`,
+    recur: "RRULE:FREQ=YEARLY",
+  });
+  return "https://calendar.google.com/calendar/render?" + p.toString();
+}
+
+/* ---------- 複数JSONの切り分け(まとめて読み込み用) ---------- */
+function extractJsonObjects(text) {
+  const t = text.trim();
+  try {
+    const parsed = JSON.parse(t);
+    return Array.isArray(parsed) ? parsed.map((o) => JSON.stringify(o)) : [t];
+  } catch (e) { /* 連続貼り付けの場合は下で切り分ける */ }
+  const out = [];
+  let depth = 0, start = -1, inStr = false, esc = false;
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === "{") { if (depth === 0) start = i; depth++; }
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0 && start >= 0) { out.push(t.slice(start, i + 1)); start = -1; }
+    }
+  }
+  return out;
+}
+
+/* ---------- ココフォリア形式の入出力 ---------- */
+function importCocofolia(text, base) {
+  const json = JSON.parse(text);
+  const data = json.kind === "character" ? json.data : json;
+  const c = normalizeCharacter({ ...base });
+
+  if (data.name) c.name = data.name;
+  if (data.iconUrl) c.iconUrl = data.iconUrl;
+  if (data.externalUrl) c.externalUrl = data.externalUrl;
+  if (data.color) c.color = data.color;
+
+  (data.params || []).forEach((p) => {
+    const k = String(p.label).toUpperCase();
+    if (/^[A-Z]{2,4}$/.test(k)) c.abilities[k] = String(num(p.value));
+  });
+  /* 7版の見分け: LUKパラメータがある、またはコマンドがCC<=形式 */
+  const hasLuk = (data.params || []).some((p) => String(p.label).toUpperCase() === "LUK");
+  if (hasLuk || /^\s*CC<=/m.test(String(data.commands || ""))) c.edition = "7e";
+  (data.status || []).forEach((s) => {
+    const k = String(s.label).toUpperCase();
+    if (k in c.current) c.current[k] = String(num(s.value));
+  });
+
+  const skipNames = new Set(["アイデア", "幸運", "知識", "正気度ロール"]);
+  const skills = {};
+  for (const line of String(data.commands || "").split("\n")) {
+    const m = line.match(/^\s*CCB?<=(\d+)\s*【(.+?)】/);
+    if (!m) continue;
+    const name = normName(m[2]);
+    if (skipNames.has(name)) continue;
+    if (/^(STR|CON|POW|DEX|APP|SIZ|INT|EDU)\s*[×xX*]\s*5$/i.test(name)) continue;
+    skills[name] = num(m[1]);
+  }
+  c.skills = skills;
+  return c;
+}
+
+function exportCocofolia(c, rs) {
+  const dv = Object.fromEntries(rs.derive(c.abilities).map((d) => [d.key, d.value]));
+  const cur = (k) => (c.current[k] !== "" ? num(c.current[k]) : dv[k]);
+  const dbSuffix = dv.DB === "±0" ? "" : dv.DB;
+  const is7e = c.edition === "7e";
+  const pfx = is7e ? "CC" : "CCB";
+
+  const lines = ["1d100<={SAN} 【正気度ロール】"];
+  if (dv.IDEA !== undefined) lines.push(`${pfx}<=${dv.IDEA} 【アイデア】`);
+  if (is7e) lines.push(`${pfx}<={LUK} 【幸運】`);
+  else if (dv.LUCK !== undefined) lines.push(`${pfx}<=${dv.LUCK} 【幸運】`);
+  if (dv.KNOW !== undefined) lines.push(`${pfx}<=${dv.KNOW} 【知識】`);
+  rs.skillCategories.forEach((cat) =>
+    cat.skills.forEach((s) => {
+      const name = normName(s.n);
+      lines.push(`${pfx}<=${c.skills[name] ?? skillInit(s, c.abilities)} 【${name}】`);
+    })
+  );
+  const master = new Set(masterSkillNames(rs));
+  Object.entries(c.skills).forEach(([name, value]) => {
+    if (!master.has(name)) lines.push(`${pfx}<=${value} 【${name}】`);
+  });
+  ["1d3", "1d4", "1d6"].forEach((b) => lines.push(`${b}${dbSuffix} 【ダメージ判定】`));
+  const abilityKeys = is7e
+    ? ["STR", "CON", "POW", "DEX", "APP", "SIZ", "INT", "EDU", "LUK"]
+    : ["STR", "CON", "POW", "DEX", "APP", "SIZ", "INT", "EDU"];
+  abilityKeys.forEach((k) =>
+    lines.push(is7e ? `CC<={${k}} 【${k}】` : `CCB<={${k}}*5 【${k} × 5】`)
+  );
+
+  return JSON.stringify({
+    kind: "character",
+    data: {
+      name: c.name,
+      initiative: num(c.abilities.DEX),
+      externalUrl: c.externalUrl || "",
+      iconUrl: c.iconUrl || "",
+      commands: lines.join("\n") + "\n",
+      status: [
+        { label: "HP", value: cur("HP"), max: dv.HP },
+        { label: "MP", value: cur("MP"), max: dv.MP },
+        { label: "SAN", value: cur("SAN"), max: dv.SAN },
+      ],
+      params: (is7e
+        ? ["STR", "CON", "POW", "DEX", "APP", "SIZ", "INT", "EDU", "LUK"]
+        : ["STR", "CON", "POW", "DEX", "APP", "SIZ", "INT", "EDU"])
+        .map((k) => ({ label: k, value: String(num(c.abilities[k])) })),
+      color: c.color || "#ffd900",
+    },
+  });
+}
+
+/* ---------- 小さなUI部品 ---------- */
+const Label = ({ children }) => (
+  <div style={{ fontFamily: mono, fontSize: 11, letterSpacing: 2, color: T.dim, marginBottom: 4 }}>
+    {children}
+  </div>
+);
+
+const inputStyle = {
+  width: "100%", boxSizing: "border-box", background: T.panel2,
+  border: `1px solid ${T.line}`, borderRadius: 2, padding: "8px 10px",
+  color: T.paper, fontFamily: serif, fontSize: 15, outline: "none",
+};
+
+const Field = ({ label, value, onChange, placeholder = "" }) => (
+  <div>
+    <Label>{label}</Label>
+    <input value={value} placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)} style={inputStyle} />
+  </div>
+);
+
+const Area = ({ label, value, onChange, rows = 3, placeholder = "" }) => (
+  <div>
+    <Label>{label}</Label>
+    <textarea value={value} rows={rows} placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      style={{ ...inputStyle, fontSize: 14, lineHeight: 1.7, resize: "vertical" }} />
+  </div>
+);
+
+const Btn = ({ children, onClick, color = T.paper, border = T.line, small }) => (
+  <button onClick={onClick}
+    style={{
+      background: T.panel2, border: `1px solid ${border}`, color,
+      fontFamily: mono, fontSize: small ? 11 : 13, letterSpacing: 1,
+      padding: small ? "4px 10px" : "8px 18px", borderRadius: 2, cursor: "pointer",
+    }}>
+    {children}
+  </button>
+);
+
+const Section = ({ title, children, right }) => (
+  <section style={{ background: T.panel, border: `1px solid ${T.line}`, padding: 18, marginBottom: 16, borderRadius: 2 }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12, flexWrap: "wrap", gap: 6 }}>
+      <Label>{title}</Label>
+      {right}
+    </div>
+    {children}
+  </section>
+);
+
+/* Xのポストを埋め込み表示(widgets.jsで描画) */
+function XEmbed({ post }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    let cancelled = false;
+    const render = () => {
+      if (cancelled || !ref.current) return;
+      if (window.twttr && window.twttr.widgets) {
+        ref.current.innerHTML = "";
+        window.twttr.widgets.createTweet(post.statusId, ref.current, { theme: "light", conversation: "none", align: "center" }).catch(() => {});
+      } else {
+        setTimeout(render, 400); // widgets.js 読み込み待ち
+      }
+    };
+    render();
+    return () => { cancelled = true; };
+  }, [post.statusId]);
+  return <div ref={ref} style={{ minHeight: 80 }} />;
+}
+
+/* 探索者を名前で検索して選ぶコンボボックス */
+function CharPicker({ characters, value, onChange, width = 200, noneLabel = "(なし)" }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const sel = characters.find((c) => c.id === value);
+  const ql = q.trim().toLowerCase();
+  const matches = characters.filter((c) =>
+    ql === "" || [c.name, c.occupation].some((t) => String(t || "").toLowerCase().includes(ql))
+  );
+  const row = { display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", cursor: "pointer", borderBottom: `1px solid ${T.line}` };
+  return (
+    <div style={{ position: "relative", width }}>
+      <input
+        value={open ? q : (sel ? (sel.name || "(名称未記入)") : "")}
+        placeholder={sel ? (sel.name || "(名称未記入)") : "名前で検索…"}
+        onFocus={() => { setOpen(true); setQ(""); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onChange={(e) => setQ(e.target.value)}
+        style={{ ...inputStyle, fontSize: 14 }} />
+      {open && (
+        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 60, background: T.panel2, border: `1px solid ${T.line}`, maxHeight: 230, overflowY: "auto", boxShadow: "0 4px 14px rgba(46,42,35,0.2)" }}>
+          <div onMouseDown={() => { onChange(""); setOpen(false); }}
+            style={{ ...row, fontFamily: serif, fontSize: 13, color: T.dim }}>{noneLabel}</div>
+          {matches.map((c) => (
+            <div key={c.id} onMouseDown={() => { onChange(c.id); setOpen(false); }} style={row}>
+              {c.iconUrl && (
+                <img src={c.iconUrl} alt="" onError={(e) => { e.target.style.display = "none"; }}
+                  style={{ width: 24, height: 24, objectFit: "cover", objectPosition: "center top", borderRadius: 2, flexShrink: 0 }} />
+              )}
+              <span style={{ fontFamily: serif, fontSize: 13, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {c.name || "(名称未記入)"}
+              </span>
+              <span style={{ fontFamily: mono, fontSize: 10, color: T.dim }}>{c.occupation || ""}</span>
+            </div>
+          ))}
+          {matches.length === 0 && (
+            <div style={{ padding: 8, fontFamily: serif, fontSize: 12, color: T.dim }}>該当なし</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- 本体 ---------- */
+function App() {
+  const [characters, setCharacters] = useState(() => store.load());
+  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 760);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 760);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  const [view, setView] = useState("calendar");
+  const [draft, setDraft] = useState(null);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const [ioOpen, setIoOpen] = useState(false);
+  const [ioText, setIoText] = useState("");
+  const [ioMsg, setIoMsg] = useState("");
+  const [listMsg, setListMsg] = useState("");
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [pickedId, setPickedId] = useState(null);
+  const [picking, setPicking] = useState(false);
+  const [listQuery, setListQuery] = useState("");
+  const [newSkill, setNewSkill] = useState({ name: "", value: "" });
+  const [newContact, setNewContact] = useState({ name: "", note: "", url: "" });
+  const [newSession, setNewSession] = useState({ date: "", scenario: "" });
+  const fileRef = useRef(null);
+
+  /* 予定(カレンダー)関連 */
+  const [events, setEvents] = useState(() => eventStore.load());
+  const [calYM, setCalYM] = useState(() => { const n = new Date(); return { y: n.getFullYear(), m: n.getMonth() + 1 }; });
+  const [eventFocusId, setEventFocusId] = useState(null);
+  const [newEvent, setNewEvent] = useState({ date: "", endDate: "", time: "", title: "", cat: "配信", repeat: "none", url: "", role: "PL", characterId: "", campaign: "", discord: "" });
+  const [popupOpen, setPopupOpen] = useState(true);
+  const persistEvents = (list) => { setEvents(list); eventStore.save(list); };
+
+  /* セッション日誌関連 */
+  const [journal, setJournal] = useState(() => journalStore.load());
+  const [jDraft, setJDraft] = useState(null); // nullなら入力フォーム非表示
+  const [journalFocusId, setJournalFocusId] = useState(null);
+  const persistJournal = (list) => { setJournal(list); journalStore.save(list); };
+
+  /* 視聴リスト(YouTube) */
+  const [watch, setWatch] = useState(() => watchStore.load());
+  const [newWatch, setNewWatch] = useState({ title: "", url: "" });
+  const [playing, setPlaying] = useState(null); // 再生中アイテムのembed URL
+  const persistWatch = (list) => { setWatch(list); watchStore.save(list); };
+
+  /* ポスト集(X / Twitter) */
+  const [posts, setPosts] = useState(() => postStore.load());
+  const [newPost, setNewPost] = useState({ url: "", tags: "", memo: "" });
+  const [postFilter, setPostFilter] = useState("");
+  const persistPosts = (list) => { setPosts(list); postStore.save(list); };
+  const saveJournal = () => {
+    if (!jDraft || (!jDraft.date && !jDraft.scenario.trim())) return;
+    const e = { ...jDraft, updatedAt: Date.now() };
+    const exists = journal.some((x) => x.id === e.id);
+    persistJournal(exists ? journal.map((x) => (x.id === e.id ? e : x)) : [e, ...journal]);
+    setJDraft(null);
+    setJournalFocusId(e.id);
+  };
+
+  const persist = (list) => { setCharacters(list); store.save(list); };
+
+  /* ===== クラウド同期 ===== */
+  const [syncCode, setSyncCode] = useState(() => cloud.getCode());
+  const [syncStatus, setSyncStatus] = useState("idle"); // idle | syncing | ok | error | off
+  const [syncOpen, setSyncOpen] = useState(false);
+  const hydratedRef = useRef(false); // 初回pull完了まではpushしない
+  const pushTimer = useRef(null);
+
+  /* 起動時・コード変更時: クラウドから読み込んで反映 */
+  useEffect(() => {
+    let cancelled = false;
+    hydratedRef.current = false;
+    if (!syncCode) { setSyncStatus("off"); hydratedRef.current = true; return; }
+    setSyncStatus("syncing");
+    cloud.pull().then((data) => {
+      if (cancelled) return;
+      if (data) {
+        if (Array.isArray(data.characters)) { const v = data.characters.map(normalizeCharacter); setCharacters(v); store.save(v); }
+        if (Array.isArray(data.events)) { setEvents(data.events); eventStore.save(data.events); }
+        if (Array.isArray(data.journal)) { setJournal(data.journal); journalStore.save(data.journal); }
+        if (Array.isArray(data.watch)) { setWatch(data.watch); watchStore.save(data.watch); }
+        if (Array.isArray(data.posts)) { setPosts(data.posts); postStore.save(data.posts); }
+      }
+      setSyncStatus("ok");
+      hydratedRef.current = true;
+    }).catch((e) => {
+      console.error(e);
+      if (!cancelled) { setSyncStatus("error"); hydratedRef.current = true; }
+    });
+    return () => { cancelled = true; };
+  }, [syncCode]);
+
+  /* データ変更時: 少し待ってからクラウドへ書き込み(デバウンス) */
+  useEffect(() => {
+    if (!syncCode || !hydratedRef.current) return;
+    if (pushTimer.current) clearTimeout(pushTimer.current);
+    setSyncStatus("syncing");
+    pushTimer.current = setTimeout(() => {
+      cloud.push({ characters, events, journal, watch, posts })
+        .then((ok) => setSyncStatus(ok ? "ok" : "error"))
+        .catch((e) => { console.error(e); setSyncStatus("error"); });
+    }, 1200);
+    return () => { if (pushTimer.current) clearTimeout(pushTimer.current); };
+  }, [characters, events, journal, watch, posts, syncCode]);
+
+  const applySyncCode = (code) => {
+    const c = code.trim();
+    cloud.setCode(c);
+    setSyncCode(c);
+  };
+  const manualPull = () => {
+    if (!syncCode) return;
+    setSyncStatus("syncing");
+    cloud.pull().then((data) => {
+      if (data) {
+        if (Array.isArray(data.characters)) { const v = data.characters.map(normalizeCharacter); setCharacters(v); store.save(v); }
+        if (Array.isArray(data.events)) { setEvents(data.events); eventStore.save(data.events); }
+        if (Array.isArray(data.journal)) { setJournal(data.journal); journalStore.save(data.journal); }
+        if (Array.isArray(data.watch)) { setWatch(data.watch); watchStore.save(data.watch); }
+        if (Array.isArray(data.posts)) { setPosts(data.posts); postStore.save(data.posts); }
+        setSyncStatus("ok");
+      } else { setSyncStatus("ok"); }
+    }).catch((e) => { console.error(e); setSyncStatus("error"); });
+  };
+
+  const openNew = (withImport = false) => {
+    setDraft(blankCharacter());
+    setIoOpen(withImport); setIoText(""); setIoMsg("");
+    setView("edit");
+  };
+  const openEdit = (c) => {
+    setDraft(normalizeCharacter(JSON.parse(JSON.stringify(c))));
+    setIoOpen(false); setIoText(""); setIoMsg("");
+    setView("edit");
+  };
+
+  const saveDraft = () => {
+    const d = { ...draft, updatedAt: Date.now() };
+    const exists = characters.some((c) => c.id === d.id);
+    persist(exists ? characters.map((c) => (c.id === d.id ? d : c)) : [d, ...characters]);
+    setDraft(d);
+    setSavedFlash(true);
+    setTimeout(() => setSavedFlash(false), 1500);
+  };
+
+  const removeCharacter = (id) => {
+    if (!confirm("このファイルを破棄します。よろしいですか?")) return;
+    persist(characters.filter((c) => c.id !== id));
+    setView("list");
+  };
+
+  /* バックアップ(探索者・予定・日誌をまとめて保存/復元) */
+  const exportBackup = () => {
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    download(`coc-backup-${stamp}.json`,
+      JSON.stringify({ characters, events, journal, watch, posts }, null, 2), "application/json");
+    setListMsg("バックアップファイルをダウンロードしました(探索者・予定・日誌を含みます)。");
+  };
+  const importBackup = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        /* 旧形式(探索者の配列のみ)と新形式(オブジェクト)の両対応 */
+        const chars = (Array.isArray(data) ? data : data.characters || []).map(normalizeCharacter);
+        const mergeById = (cur, add) => {
+          const map = new Map(cur.map((x) => [x.id, x]));
+          add.forEach((x) => map.set(x.id, x));
+          return Array.from(map.values());
+        };
+        persist(mergeById(characters, chars));
+        let extra = "";
+        if (!Array.isArray(data)) {
+          if (Array.isArray(data.events)) { persistEvents(mergeById(events, data.events)); extra += "・予定"; }
+          if (Array.isArray(data.journal)) { persistJournal(mergeById(journal, data.journal)); extra += "・日誌"; }
+          if (Array.isArray(data.watch)) { persistWatch(mergeById(watch, data.watch)); extra += "・視聴リスト"; }
+          if (Array.isArray(data.posts)) { persistPosts(mergeById(posts, data.posts)); extra += "・ポスト集"; }
+        }
+        setListMsg(`探索者 ${chars.length} 件${extra}を読み込みました。`);
+      } catch (e) {
+        setListMsg("読み込みに失敗しました。バックアップ用のJSONか確認してください。");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  /* いあきゃら等のココフォリアJSONをまとめて取り込む */
+  const doBulkImport = () => {
+    const objs = extractJsonObjects(bulkText);
+    const added = [];
+    for (const o of objs) {
+      try { added.push(importCocofolia(o, blankCharacter())); } catch (e) { /* 不正な断片はスキップ */ }
+    }
+    if (added.length > 0) {
+      persist([...added, ...characters]);
+      setListMsg(`${added.length} 件の探索者を読み込みました。`);
+      setBulkText("");
+      setBulkOpen(false);
+    } else {
+      setListMsg("読み込めるデータが見つかりませんでした。JSONの形式を確認してください。");
+    }
+  };
+
+  const setAb = (k, v) => setDraft({ ...draft, abilities: { ...draft.abilities, [k]: v } });
+
+  /* 版の切替(希望すれば能力値を×5/÷5で換算) */
+  const changeEdition = (newEd) => {
+    if (!draft || newEd === draft.edition) return;
+    let ab = { ...draft.abilities };
+    if (confirm("能力値を新しい版の基準に換算しますか?\n(6版→7版は×5、7版→6版は÷5。技能値は換算されません)")) {
+      const f = newEd === "7e" ? 5 : 1 / 5;
+      Object.keys(ab).forEach((k) => {
+        if (ab[k] !== "" && ab[k] != null && k !== "LUK") ab[k] = String(Math.round(num(ab[k]) * f));
+      });
+    }
+    setDraft({ ...draft, edition: newEd, abilities: ab });
+  };
+  const setProf = (k, v) => setDraft({ ...draft, profile: { ...draft.profile, [k]: v } });
+  const setSkill = (name, v) => {
+    const skills = { ...draft.skills };
+    if (v === "" || v === null) delete skills[name]; else skills[name] = num(v);
+    setDraft({ ...draft, skills });
+  };
+
+  const ruleset = draft ? RULESETS[draft.edition] : RULESETS["6e"];
+
+  const doImport = () => {
+    try {
+      setDraft(importCocofolia(ioText, draft));
+      setIoMsg("読み込みました。内容を確認して「保存する」を押してください。");
+    } catch (e) {
+      setIoMsg("読み込みに失敗しました。JSONの形式を確認してください。");
+    }
+  };
+
+  const doExport = async () => {
+    const json = exportCocofolia(draft, ruleset);
+    setIoText(json);
+    try {
+      await navigator.clipboard.writeText(json);
+      setIoMsg("クリップボードにコピーしました。ココフォリアの盤面で貼り付け(Ctrl+V)してください。");
+    } catch (e) {
+      setIoMsg("下の欄のJSONを全選択してコピーし、ココフォリアの盤面で貼り付けてください。");
+    }
+  };
+
+  const extraSkills = draft
+    ? Object.keys(draft.skills).filter((n) => !masterSkillNames(ruleset).includes(n))
+    : [];
+
+  /* 今日の予定(起動時ポップアップ用) */
+  const todayD = new Date();
+  const todayBirthdays = characters.filter(
+    (c) => num(c.birthday.month) === todayD.getMonth() + 1 && num(c.birthday.day) === todayD.getDate()
+  );
+  const todayEventsList = events.filter((ev) => eventOccursOn(ev, todayD));
+  const charById = (id) => characters.find((c) => c.id === id);
+  const charMatches = (c) => {
+    const q = listQuery.trim().toLowerCase();
+    if (!q) return true;
+    if ([c.name, c.occupation, c.origin].some((t) => String(t || "").toLowerCase().includes(q))) return true;
+    /* 値を振った(初期値から変更した)技能名でも検索 */
+    return Object.keys(c.skills || {}).some((sk) => normName(sk).toLowerCase().includes(q));
+  };
+
+  /* ランダムピックアップ: 名前を高速で切り替えてから1人に決定 */
+  const spinPick = () => {
+    if (characters.length === 0) {
+      setListMsg("探索者が登録されていません。まずはファイルを作成してください。");
+      return;
+    }
+    setPicking(true);
+    let count = 0;
+    const iv = setInterval(() => {
+      const c = characters[Math.floor(Math.random() * characters.length)];
+      setPickedId(c.id);
+      count++;
+      if (count > 14) {
+        clearInterval(iv);
+        setPicking(false);
+      }
+    }, 80);
+  };
+
+  /* TRPG予定 → セッション日誌へ転記(日付・シナリオ・探索者を引き継ぐ) */
+  const recordSessionFromEvent = (ev) => {
+    const dup = journal.some(
+      (j) => j.date === ev.date && j.scenario === ev.title && j.characterId === ev.characterId
+    );
+    if (!dup) {
+      persistJournal([
+        { ...blankJournalEntry(), date: ev.date, scenario: ev.title, characterId: ev.characterId },
+        ...journal,
+      ]);
+    }
+    persistEvents(events.map((x) => (x.id === ev.id ? { ...x, recorded: true } : x)));
+  };
+
+  const navItem = (key, icon, label) => (
+    <div onClick={() => setView(key)}
+      style={isMobile ? {
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 10px",
+        cursor: "pointer", flex: "1 0 auto", minWidth: 64,
+        borderBottom: `3px solid ${view === key ? T.gold : "transparent"}`,
+        color: view === key ? T.gold : T.dim, fontFamily: serif, fontSize: 11,
+      } : {
+        display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", cursor: "pointer",
+        borderRadius: 3, marginBottom: 2,
+        background: view === key ? T.panel2 : "transparent",
+        borderLeft: `3px solid ${view === key ? T.gold : "transparent"}`,
+        color: view === key ? T.paper : T.dim,
+        fontFamily: serif, fontSize: 15,
+      }}>
+      <span style={{ fontSize: isMobile ? 19 : 17 }}>{icon}</span>{label}
+    </div>
+  );
+
+  return (
+    <div style={{ minHeight: "100vh", background: T.bg, color: T.paper }}>
+      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", maxWidth: 1240, margin: "0 auto", alignItems: isMobile ? "stretch" : "flex-start" }}>
+
+        {/* ===== ナビ(PC:左サイドバー / スマホ:上部タブ) ===== */}
+        <aside style={isMobile ? {
+          position: "sticky", top: 0, zIndex: 50, background: T.panel,
+          borderBottom: `1px solid ${T.line}`, boxShadow: "0 2px 8px rgba(46,42,35,0.12)",
+        } : {
+          width: 220, flexShrink: 0, position: "sticky", top: 0, alignSelf: "flex-start",
+          height: "100vh", boxSizing: "border-box", overflowY: "auto",
+          background: T.panel, borderRight: `1px solid ${T.line}`, padding: "24px 14px",
+        }}>
+          {!isMobile && (
+            <div style={{ padding: "0 6px 14px", borderBottom: `1px solid ${T.line}`, marginBottom: 14 }}>
+              <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 2, color: T.gold }}>ARCANE ALMANAC</div>
+              <div style={{ fontFamily: serif, fontSize: 17, marginTop: 4 }}>記録と予定の手帖</div>
+              <div style={{ fontFamily: mono, fontSize: 9, color: T.dim, marginTop: 2 }}>CoC 6版・7版対応</div>
+            </div>
+          )}
+
+          <div style={isMobile ? { display: "flex", overflowX: "auto", WebkitOverflowScrolling: "touch" } : {}}>
+            {navItem("calendar", "📅", "カレンダー")}
+            {navItem("posts", "✕", "ポスト集")}
+            {navItem("list", "📖", "探索者名簿")}
+            {navItem("journal", "📔", "セッション日誌")}
+            {navItem("watch", "▶", "視聴リスト")}
+            {isMobile && (
+              <div onClick={() => setSyncOpen(true)}
+                style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 10px", cursor: "pointer", flex: "1 0 auto", minWidth: 64, color: syncStatus === "ok" ? T.green : syncStatus === "error" ? T.red : T.dim, fontFamily: serif, fontSize: 11 }}>
+                <span style={{ fontSize: 19 }}>☁</span>同期
+              </div>
+            )}
+          </div>
+
+          {!isMobile && (
+            <React.Fragment>
+              <div style={{ borderTop: `1px solid ${T.line}`, margin: "14px 0", paddingTop: 14 }}>
+                <div onClick={spinPick}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", cursor: "pointer", color: T.gold, fontFamily: serif, fontSize: 14 }}>
+                  <span style={{ fontSize: 16 }}>🎲</span>ランダムピック
+                </div>
+              </div>
+              <div style={{ padding: "0 8px", display: "grid", gap: 8, marginTop: 4 }}>
+                <Btn small onClick={() => setSyncOpen(true)}>
+                  {syncCode ? (syncStatus === "ok" ? "☁ 同期中 ✓" : syncStatus === "syncing" ? "☁ 同期…" : syncStatus === "error" ? "☁ 同期エラー" : "☁ 同期") : "☁ 同期を設定"}
+                </Btn>
+                <Btn small onClick={exportBackup}>💾 バックアップ</Btn>
+                <Btn small onClick={() => fileRef.current && fileRef.current.click()}>📂 復元</Btn>
+              </div>
+            </React.Fragment>
+          )}
+        </aside>
+
+        {/* ===== 右メイン ===== */}
+        <main style={{ flex: 1, minWidth: 0, padding: isMobile ? "16px 14px 60px" : "28px 24px 60px" }}>
+
+        {/* ===== 同期設定モーダル ===== */}
+        {syncOpen && (
+          <div onClick={() => setSyncOpen(false)}
+            style={{ position: "fixed", inset: 0, background: "rgba(46,42,35,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 110, padding: 16 }}>
+            <div onClick={(e) => e.stopPropagation()}
+              style={{ background: T.panel, borderTop: `4px solid ${T.gold}`, border: `1px solid ${T.line}`, padding: 24, maxWidth: 440, width: "100%", borderRadius: 2, boxShadow: "0 8px 30px rgba(0,0,0,0.25)" }}>
+              <div style={{ fontFamily: mono, fontSize: 11, letterSpacing: 3, color: T.gold, marginBottom: 6 }}>☁ CLOUD SYNC — クラウド同期</div>
+              <div style={{ fontFamily: serif, fontSize: 13, color: T.dim, lineHeight: 1.7, marginBottom: 14 }}>
+                同じ「同期コード」を入れた端末どうしでデータを共有できます。PC・スマホで同じコードを設定してください。コードは推測されにくい長めの文字列にしてください(例: <span style={{ fontFamily: mono }}>hokou-cthulhu-7x9q2</span>)。
+              </div>
+              <Label>同期コード(合言葉)</Label>
+              <input value={syncCode} onChange={(e) => setSyncCode(e.target.value)}
+                placeholder="例: hokou-cthulhu-7x9q2"
+                style={{ ...inputStyle, fontFamily: mono, marginBottom: 6 }} />
+              <div style={{ fontFamily: mono, fontSize: 11, marginBottom: 14, color: syncStatus === "ok" ? T.green : syncStatus === "error" ? T.red : T.dim }}>
+                状態: {
+                  !cloud.getCode() ? "未設定(この端末のみに保存)" :
+                  syncStatus === "ok" ? "同期済み ✓" :
+                  syncStatus === "syncing" ? "同期中…" :
+                  syncStatus === "error" ? "エラー(通信失敗・ルール未設定の可能性)" : "—"
+                }
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Btn small color={T.green} border={T.green}
+                  onClick={() => { applySyncCode(syncCode); }}>この コードで同期</Btn>
+                <Btn small onClick={manualPull}>↻ 今すぐ取得</Btn>
+                <Btn small color={T.red} border={T.red}
+                  onClick={() => { applySyncCode(""); setSyncStatus("off"); }}>同期を解除</Btn>
+                <Btn small onClick={() => setSyncOpen(false)}>閉じる</Btn>
+              </div>
+              <div style={{ fontFamily: serif, fontSize: 11.5, color: T.dim, lineHeight: 1.7, marginTop: 14, borderTop: `1px dashed ${T.line}`, paddingTop: 10 }}>
+                ※ 同じコードを別端末で初めて設定すると、クラウド側のデータがこの端末に取り込まれます。先に大事なデータがある端末から同期を始めるのが安全です。心配なときは「💾 バックアップ」で控えを取ってください。
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===== 今日の予定ポップアップ ===== */}
+        {popupOpen && (todayBirthdays.length > 0 || todayEventsList.length > 0) && (
+          <div onClick={() => setPopupOpen(false)}
+            style={{ position: "fixed", inset: 0, background: "rgba(46,42,35,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
+            <div onClick={(e) => e.stopPropagation()}
+              style={{ background: T.panel, borderTop: `4px solid ${T.gold}`, border: `1px solid ${T.line}`, padding: 24, maxWidth: 440, width: "88%", borderRadius: 2, boxShadow: "0 8px 30px rgba(0,0,0,0.25)" }}>
+              <div style={{ fontFamily: mono, fontSize: 11, letterSpacing: 3, color: T.gold, marginBottom: 10 }}>
+                TODAY — 今日の予定 ({todayD.getMonth() + 1}/{todayD.getDate()})
+              </div>
+              {todayBirthdays.map((c) => (
+                <div key={c.id} style={{ fontFamily: serif, fontSize: 15, padding: "4px 0", color: T.red, display: "flex", gap: 8, alignItems: "baseline" }}>
+                  <span style={{ flex: 1 }}>🎂 {c.name || "(名称未記入)"} の誕生日です!</span>
+                  <a href={googleCalendarUrl(c)} target="_blank" rel="noreferrer" title="Googleカレンダーに追加"
+                    style={{ fontFamily: mono, fontSize: 10, color: T.green, textDecoration: "none" }}>G+</a>
+                </div>
+              ))}
+              {todayEventsList.map((ev) => (
+                <div key={ev.id} style={{ fontFamily: serif, fontSize: 15, padding: "4px 0", display: "flex", gap: 8, alignItems: "baseline" }}>
+                  <span style={{ fontFamily: mono, fontSize: 10, color: "#fff", background: EVENT_CATS[ev.cat] || T.dim, padding: "1px 6px", borderRadius: 8 }}>{ev.cat}</span>
+                  {ev.cat === "TRPG" && ev.role && (
+                    <span style={{ fontFamily: mono, fontSize: 10, color: "#fff", background: ev.role === "GM" ? T.gold : T.green, padding: "1px 6px", borderRadius: 8 }}>{ev.role}</span>
+                  )}
+                  <span style={{ flex: 1 }}>{ev.time && `${ev.time} `}{ev.title}</span>
+                  {ev.cat === "TRPG" && ev.characterId && charById(ev.characterId) && (
+                    <span onClick={() => { setPopupOpen(false); openEdit(charById(ev.characterId)); }}
+                      style={{ fontFamily: serif, fontSize: 12, color: T.green, cursor: "pointer", textDecoration: "underline", whiteSpace: "nowrap" }}>
+                      シートへ
+                    </span>
+                  )}
+                  {ev.discord && (
+                    <a href={ev.discord} target="_blank" rel="noreferrer"
+                      style={{ fontFamily: mono, fontSize: 11, color: "#5865F2", textDecoration: "none", whiteSpace: "nowrap" }}>💬 Discord ↗</a>
+                  )}
+                  {ev.url && (
+                    <a href={ev.url} target="_blank" rel="noreferrer"
+                      style={{ fontFamily: mono, fontSize: 11, color: T.green, textDecoration: "none", whiteSpace: "nowrap" }}>{linkLabel(ev.url)}</a>
+                  )}
+                </div>
+              ))}
+              <div style={{ textAlign: "right", marginTop: 14 }}>
+                <Btn small onClick={() => setPopupOpen(false)}>閉じる</Btn>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===== 一覧 ===== */}
+        {view === "list" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ fontFamily: serif, fontSize: 22 }}>探索者名簿 <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{characters.length} 名</span></div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Btn onClick={() => setBulkOpen(!bulkOpen)} small>⇊ まとめて読み込み</Btn>
+                <Btn onClick={() => openNew(true)} small>↓ JSONから読み込む</Btn>
+                <Btn onClick={() => openNew(false)} color={T.green} border={T.green}>+ 新しい探索者</Btn>
+              </div>
+            </div>
+            <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: "none" }}
+              onChange={(e) => { if (e.target.files[0]) importBackup(e.target.files[0]); e.target.value = ""; }} />
+            {listMsg && (
+              <div style={{ fontFamily: serif, fontSize: 13, color: T.green, marginBottom: 12 }}>{listMsg}</div>
+            )}
+
+            {bulkOpen && (
+              <Section title="まとめて読み込み BULK IMPORT(いあきゃら → 一括移行)">
+                <div style={{ fontFamily: serif, fontSize: 13, color: T.dim, marginBottom: 8, lineHeight: 1.7 }}>
+                  いあきゃらの各キャラクターページで「ココフォリア出力」をコピーし、下の欄に<b>続けて貼り付けて</b>ください(複数件OK。改行区切りでも連続でも構いません)。6版・7版は自動で判別します。
+                </div>
+                <textarea value={bulkText} rows={8} onChange={(e) => setBulkText(e.target.value)}
+                  placeholder={'{"kind":"character","data":{...}}\n{"kind":"character","data":{...}}\n…と複数まとめて貼り付け'}
+                  style={{ ...inputStyle, fontFamily: mono, fontSize: 12, lineHeight: 1.5, resize: "vertical" }} />
+                <div style={{ marginTop: 10 }}>
+                  <Btn onClick={doBulkImport} small color={T.green} border={T.green}>⇊ まとめて読み込む</Btn>
+                </div>
+              </Section>
+            )}
+
+            {/* ランダムピックアップ結果 */}
+            {pickedId && charById(pickedId) && (() => {
+              const c = charById(pickedId);
+              const dv = RULESETS[c.edition].derive(c.abilities);
+              const pick = (k) => dv.find((x) => x.key === k)?.value;
+              return (
+                <div onClick={() => !picking && setPickedId(null)}
+                  style={{ position: "fixed", inset: 0, background: "rgba(46,42,35,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
+                  <div onClick={(e) => e.stopPropagation()}
+                    style={{ background: T.panel, border: `1px solid ${T.line}`, borderTop: `4px solid ${T.gold}`, padding: 28, maxWidth: 420, width: "88%", borderRadius: 2, boxShadow: "0 8px 30px rgba(0,0,0,0.25)", textAlign: "center" }}>
+                    <div style={{ fontFamily: mono, fontSize: 11, letterSpacing: 3, color: T.gold, marginBottom: 14 }}>
+                      {picking ? "FATE IS ROLLING…" : "THE CHOSEN ONE — 選ばれし探索者"}
+                    </div>
+                    {c.iconUrl ? (
+                      <img src={c.iconUrl} alt="" onError={(e) => { e.target.style.display = "none"; }}
+                        style={{ width: 96, height: 96, objectFit: "cover", objectPosition: "center top", borderRadius: "50%", border: `2px solid ${picking ? T.line : (c.color || T.gold)}`, marginBottom: 10 }} />
+                    ) : (
+                      <div style={{ width: 96, height: 96, borderRadius: "50%", border: `2px solid ${picking ? T.line : T.gold}`, margin: "0 auto 10px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 36, background: T.panel2 }}>🎲</div>
+                    )}
+                    <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, letterSpacing: 1 }}>
+                      FILE No. {c.id.slice(-6).toUpperCase()} ／ {RULESETS[c.edition].label}
+                    </div>
+                    <div style={{ fontFamily: serif, fontSize: 24, margin: "4px 0 2px", opacity: picking ? 0.55 : 1 }}>
+                      {c.name || "(名称未記入)"}
+                    </div>
+                    <div style={{ fontFamily: serif, fontSize: 13, color: T.dim }}>
+                      {c.occupation || "職業不詳"}{c.age ? ` ・ ${c.age}歳` : ""}
+                    </div>
+                    <div style={{ display: "flex", gap: 16, justifyContent: "center", marginTop: 10, fontFamily: mono, fontSize: 13 }}>
+                      <span>HP <b>{pick("HP")}</b></span>
+                      <span>MP <b>{pick("MP")}</b></span>
+                      <span style={{ color: T.red }}>SAN <b>{pick("SAN")}</b></span>
+                    </div>
+                    {!picking && c.profile.belief && (
+                      <div style={{ fontFamily: serif, fontSize: 12.5, color: T.dim, marginTop: 10, fontStyle: "italic" }}>
+                        “{c.profile.belief}”
+                      </div>
+                    )}
+                    <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 18 }}>
+                      <Btn small onClick={spinPick}>🎲 もう一度</Btn>
+                      {!picking && (
+                        <Btn small color={T.green} border={T.green}
+                          onClick={() => { const ch = c; setPickedId(null); openEdit(ch); }}>
+                          シートを開く
+                        </Btn>
+                      )}
+                      <Btn small onClick={() => setPickedId(null)}>閉じる</Btn>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {characters.length > 0 && (
+              <div style={{ marginBottom: 12, display: "flex", alignItems: "baseline", gap: 10 }}>
+                <input value={listQuery} onChange={(e) => setListQuery(e.target.value)}
+                  placeholder="🔍 名前・職業・出身・技能で検索…"
+                  style={{ ...inputStyle, maxWidth: 320, fontSize: 13, padding: "7px 10px" }} />
+                {listQuery.trim() && (
+                  <span style={{ fontFamily: mono, fontSize: 11, color: T.dim }}>
+                    {characters.filter(charMatches).length} / {characters.length} 件
+                  </span>
+                )}
+              </div>
+            )}
+
+            {characters.length === 0 && (
+              <div style={{ border: `1px dashed ${T.line}`, padding: 40, textAlign: "center", color: T.dim, fontFamily: serif, background: T.panel }}>
+                まだ記録がありません。「+ 新しい探索者」または「↓ JSONから読み込む」でファイルを作成してください。
+              </div>
+            )}
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
+              {characters.filter(charMatches).map((c) => {
+                const dv = RULESETS[c.edition].derive(c.abilities);
+                const pick = (k) => dv.find((x) => x.key === k)?.value;
+                return (
+                  <div key={c.id} onClick={() => openEdit(c)}
+                    style={{
+                      background: T.panel, border: `1px solid ${T.line}`,
+                      borderTop: `3px solid ${c.color || T.gold}`,
+                      borderRadius: 2, padding: 16, cursor: "pointer",
+                      display: "flex", gap: 12, boxShadow: "0 1px 3px rgba(46,42,35,0.08)",
+                    }}>
+                    {c.iconUrl && (
+                      <img src={c.iconUrl} alt="" onError={(e) => { e.target.style.display = "none"; }}
+                        style={{ width: 56, height: 56, objectFit: "cover", objectPosition: "center top", borderRadius: 2, border: `1px solid ${T.line}`, flexShrink: 0 }} />
+                    )}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, letterSpacing: 1 }}>
+                        FILE No. {c.id.slice(-6).toUpperCase()} ／ {RULESETS[c.edition].label}
+                      </div>
+                      <div style={{ fontFamily: serif, fontSize: 19, margin: "6px 0 2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {c.name || "(名称未記入)"}
+                      </div>
+                      <div style={{ color: T.dim, fontSize: 13, fontFamily: serif }}>
+                        {c.occupation || "職業不詳"}{c.age ? ` ・ ${c.age}歳` : ""}
+                        {c.sessions.length > 0 && ` ・ ${c.sessions.length}卓`}
+                      </div>
+                      <div style={{ display: "flex", gap: 14, marginTop: 10, fontFamily: mono, fontSize: 12 }}>
+                        <span>HP <b>{pick("HP")}</b></span>
+                        <span>MP <b>{pick("MP")}</b></span>
+                        <span style={{ color: T.red }}>SAN <b>{pick("SAN")}</b></span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ===== カレンダー(誕生日+予定) ===== */}
+        {view === "calendar" && (() => {
+          const { y, m } = calYM;
+          const daysInMonth = new Date(y, m, 0).getDate();
+          const leading = new Date(y, m - 1, 1).getDay();
+          const cells = [...Array(leading).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+          const move = (diff) => {
+            const nd = new Date(y, m - 1 + diff, 1);
+            setCalYM({ y: nd.getFullYear(), m: nd.getMonth() + 1 });
+          };
+          const now = new Date();
+          const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+          return (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <Btn small onClick={() => move(-1)}>◀</Btn>
+                  <span style={{ fontFamily: serif, fontSize: 20, minWidth: 120, textAlign: "center" }}>{y}年 {m}月</span>
+                  <Btn small onClick={() => move(1)}>▶</Btn>
+                  <Btn small onClick={() => { const n = new Date(); setCalYM({ y: n.getFullYear(), m: n.getMonth() + 1 }); }}>今日</Btn>
+                </div>
+                <Btn small color={T.gold} border={T.gold}
+                  onClick={() => download("coc-calendar.ics", buildICS(characters, events), "text/calendar")}>
+                  ⤓ .ics書き出し
+                </Btn>
+              </div>
+              <div style={{ fontFamily: serif, fontSize: 12.5, color: T.dim, marginBottom: 12, lineHeight: 1.7 }}>
+                探索者の誕生日(🎂)と、配信や楽しみなことなどの予定をまとめて表示します。「⤓ .ics書き出し」のファイルをGoogleカレンダーの「設定 → インポート」で読み込めば、スマホへの通知はGoogleカレンダーに任せられます。
+              </div>
+
+              {/* 月間グリッド */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: isMobile ? 2 : 4, marginBottom: 20 }}>
+                {weekdays.map((w, i) => (
+                  <div key={w} style={{ fontFamily: mono, fontSize: 11, textAlign: "center", padding: "4px 0", color: i === 0 ? T.red : i === 6 ? "#3A6EA5" : T.dim }}>
+                    {w}
+                  </div>
+                ))}
+                {cells.map((d, idx) => {
+                  if (d === null) return <div key={"e" + idx} />;
+                  const dt = new Date(y, m - 1, d);
+                  const isToday = now.getFullYear() === y && now.getMonth() + 1 === m && now.getDate() === d;
+                  const bds = characters.filter((c) => num(c.birthday.month) === m && num(c.birthday.day) === d);
+                  const evs = events.filter((ev) => eventOccursOn(ev, dt));
+                  return (
+                    <div key={d} style={{
+                      background: T.panel, border: `1px solid ${isToday ? T.gold : T.line}`,
+                      boxShadow: isToday ? `0 0 0 1px ${T.gold}` : "none",
+                      borderRadius: 2, padding: isMobile ? "2px 2px" : "4px 5px",
+                      minHeight: isMobile ? 46 : 74, overflow: "hidden",
+                    }}>
+                      <div style={{ fontFamily: mono, fontSize: 11, color: isToday ? T.gold : T.dim, marginBottom: 2 }}>{d}</div>
+                      {isMobile ? (
+                        /* スマホ: ドットだけ表示(タップで該当日不可のためカレンダー下の一覧で確認) */
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
+                          {bds.map((c) => (
+                            <span key={c.id} title={`${c.name || ""} の誕生日`} style={{ fontSize: 9 }}>🎂</span>
+                          ))}
+                          {evs.map((ev) => (
+                            <span key={ev.id} title={`${ev.title}`}
+                              onClick={() => { setEventFocusId(ev.id); setTimeout(() => { const el = document.getElementById("ev-" + ev.id); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 50); }}
+                              style={{ width: 7, height: 7, borderRadius: "50%", background: EVENT_CATS[ev.cat] || T.dim, display: "inline-block" }} />
+                          ))}
+                        </div>
+                      ) : (
+                        <React.Fragment>
+                          {bds.map((c) => (
+                            <div key={c.id} onClick={() => openEdit(c)} title={`${c.name || ""} の誕生日`}
+                              style={{ fontFamily: serif, fontSize: 11, color: T.red, cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              🎂{c.name || "?"}
+                            </div>
+                          ))}
+                          {evs.map((ev) => {
+                            let span = "";
+                            if (ev.endDate && (!ev.repeat || ev.repeat === "none")) {
+                              const s = parseYMD(ev.date), e2 = parseYMD(ev.endDate);
+                              if (s && e2) {
+                                const total = Math.round((e2 - s) / 86400000) + 1;
+                                const dayN = Math.round((dt - s) / 86400000) + 1;
+                                if (total > 1) span = ` (${dayN}/${total}日目)`;
+                              }
+                            }
+                            return (
+                              <div key={ev.id} title={`クリックで一覧へ: ${ev.time ? ev.time + " " : ""}${ev.title}${span}`}
+                                onClick={() => { setEventFocusId(ev.id); setTimeout(() => { const el = document.getElementById("ev-" + ev.id); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 50); }}
+                                style={{ fontFamily: serif, fontSize: 11, color: EVENT_CATS[ev.cat] || T.dim, cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                ● {ev.time && `${ev.time} `}{ev.cat === "TRPG" && ev.role ? `[${ev.role}] ` : ""}{ev.title}{span}
+                              </div>
+                            );
+                          })}
+                        </React.Fragment>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 予定の追加・編集 */}
+              <Section title={newEvent.id ? "予定を編集 EDIT EVENT" : "予定を追加 ADD EVENT(配信・楽しみなこと・TRPGなど)"}>
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                  <div>
+                    <Label>日付</Label>
+                    <input type="date" value={newEvent.date}
+                      onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })}
+                      style={{ ...inputStyle, fontFamily: mono, width: 155 }} />
+                  </div>
+                  {(!newEvent.repeat || newEvent.repeat === "none") && (
+                    <div>
+                      <Label>終了日(連日卓・任意)</Label>
+                      <input type="date" value={newEvent.endDate} min={newEvent.date || undefined}
+                        onChange={(e) => setNewEvent({ ...newEvent, endDate: e.target.value })}
+                        style={{ ...inputStyle, fontFamily: mono, width: 155 }} />
+                    </div>
+                  )}
+                  <div>
+                    <Label>時刻(任意)</Label>
+                    <input type="time" value={newEvent.time}
+                      onChange={(e) => setNewEvent({ ...newEvent, time: e.target.value })}
+                      style={{ ...inputStyle, fontFamily: mono, width: 110 }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 180 }}>
+                    <Label>{newEvent.cat === "TRPG" ? "シナリオ名" : "タイトル"}</Label>
+                    <input value={newEvent.title}
+                      placeholder={newEvent.cat === "TRPG" ? "シナリオ名(例: 悪霊の家)" : "〇〇さん歌枠 / 新刊発売日 など"}
+                      onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })}
+                      style={inputStyle} />
+                  </div>
+                  <div>
+                    <Label>種別</Label>
+                    <select value={newEvent.cat}
+                      onChange={(e) => setNewEvent({ ...newEvent, cat: e.target.value })}
+                      style={{ ...inputStyle, width: 105, padding: "8px 6px" }}>
+                      {Object.keys(EVENT_CATS).map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <Label>繰り返し</Label>
+                    <select value={newEvent.repeat}
+                      onChange={(e) => setNewEvent({ ...newEvent, repeat: e.target.value, endDate: e.target.value === "none" ? newEvent.endDate : "" })}
+                      style={{ ...inputStyle, width: 95, padding: "8px 6px" }}>
+                      <option value="none">なし</option>
+                      <option value="weekly">毎週</option>
+                      <option value="yearly">毎年</option>
+                    </select>
+                  </div>
+                  {newEvent.cat === "TRPG" && (
+                    <div>
+                      <Label>役割</Label>
+                      <select value={newEvent.role}
+                        onChange={(e) => setNewEvent({ ...newEvent, role: e.target.value })}
+                        style={{ ...inputStyle, width: 80, padding: "8px 6px" }}>
+                        <option value="PL">PL</option>
+                        <option value="GM">GM</option>
+                      </select>
+                    </div>
+                  )}
+                  {newEvent.cat === "TRPG" && (
+                    <div>
+                      <Label>{newEvent.role === "GM" ? "KPC等の探索者(任意)" : "使用する探索者(検索可)"}</Label>
+                      <CharPicker characters={characters} value={newEvent.characterId}
+                        onChange={(id) => setNewEvent({ ...newEvent, characterId: id })}
+                        width={185} noneLabel="(未選択)" />
+                    </div>
+                  )}
+                  <Btn small color={T.green} border={T.green} onClick={() => {
+                    if (!newEvent.date || !newEvent.title.trim()) return;
+                    const isEdit = events.some((x) => x.id === newEvent.id);
+                    const ev = { ...newEvent, id: newEvent.id || "ev" + Date.now().toString(36) };
+                    if (ev.cat !== "TRPG") { ev.role = ""; ev.characterId = ""; }
+                    if (ev.endDate && ev.endDate <= ev.date) ev.endDate = ""; // 開始日以前なら単日扱い
+                    persistEvents(isEdit ? events.map((x) => (x.id === ev.id ? ev : x)) : [...events, ev]);
+                    setNewEvent({ date: "", endDate: "", time: "", title: "", cat: newEvent.cat, repeat: "none", url: "", role: newEvent.role || "PL", characterId: "", campaign: "", discord: "" });
+                  }}>{events.some((x) => x.id === newEvent.id) ? "✓ 更新" : "+ 追加"}</Btn>
+                  {newEvent.id && (
+                    <Btn small onClick={() => setNewEvent({ date: "", endDate: "", time: "", title: "", cat: newEvent.cat, repeat: "none", url: "", role: "PL", characterId: "", campaign: "", discord: "" })}>
+                      取消
+                    </Btn>
+                  )}
+                </div>
+                <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                  {newEvent.cat === "TRPG" && (
+                    <div style={{ flex: 1, minWidth: 220 }}>
+                      <Label>キャンペーン名(任意・同名でまとめて管理)</Label>
+                      <input value={newEvent.campaign} list="campaign-list"
+                        placeholder="例: 〇〇キャンペーン(単発なら空欄)"
+                        onChange={(e) => setNewEvent({ ...newEvent, campaign: e.target.value })}
+                        style={inputStyle} />
+                      <datalist id="campaign-list">
+                        {[...new Set(events.map((x) => x.campaign).filter(Boolean))].map((cp) => (
+                          <option key={cp} value={cp} />
+                        ))}
+                      </datalist>
+                    </div>
+                  )}
+                  {newEvent.cat === "TRPG" && (
+                    <div style={{ flex: 1, minWidth: 220 }}>
+                      <Field label="Discord / 通話リンク(任意)" value={newEvent.discord}
+                        onChange={(v) => setNewEvent({ ...newEvent, discord: v })}
+                        placeholder="https://discord.gg/… やチャンネルURL" />
+                    </div>
+                  )}
+                  <div style={{ flex: 1, minWidth: 220 }}>
+                    <Field label={newEvent.cat === "TRPG" ? "その他URL(卓メモ・シナリオ等)" : "URL(任意: 配信ページ等)"} value={newEvent.url}
+                      onChange={(v) => setNewEvent({ ...newEvent, url: v })} />
+                  </div>
+                </div>
+              </Section>
+
+              {/* 登録済みの予定(上のカレンダーと同じ月を表示) */}
+              <Section title={`${y}年 ${m}月の予定 EVENTS`}>
+                {(() => {
+                  /* この月に発生する予定だけを抽出(繰り返し・連日卓も考慮) */
+                  const daysOfMonth = Array.from({ length: daysInMonth }, (_, i) => new Date(y, m - 1, i + 1));
+                  const inMonth = events.filter((ev) => daysOfMonth.some((dt) => eventOccursOn(ev, dt)));
+                  if (inMonth.length === 0) {
+                    return <div style={{ fontFamily: serif, fontSize: 13, color: T.dim }}>この月の予定はありません。</div>;
+                  }
+                  const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
+                  /* 月内での代表日(ソート用): 単発はその日、繰り返しは月内の最初の発生日 */
+                  const repDay = (ev) => {
+                    const hit = daysOfMonth.find((dt) => eventOccursOn(ev, dt));
+                    return hit ? hit.getTime() : 0;
+                  };
+                  const isPast = (ev) => {
+                    if (ev.repeat === "weekly" || ev.repeat === "yearly") return false; // 繰り返しは過去扱いしない
+                    const end = parseYMD(ev.endDate || ev.date);
+                    return end && end < todayMid;
+                  };
+
+                  const renderRow = (ev) => {
+                    const start = parseYMD(ev.date);
+                    const wd = start ? "日月火水木金土"[start.getDay()] : "";
+                    const dateLabel =
+                      ev.repeat === "weekly" ? `毎週${wd}曜` :
+                      ev.repeat === "yearly" ? `毎年 ${(ev.date || "").slice(5).replace("-", "/")}` :
+                      ev.endDate ? `${ev.date} 〜 ${ev.endDate}` : (ev.date || "日付未定");
+                    const past = isPast(ev);
+                    const focused = ev.id === eventFocusId;
+                    const ch = ev.characterId && charById(ev.characterId);
+                    return (
+                      <div key={ev.id} id={"ev-" + ev.id} style={{
+                        borderBottom: `1px dashed ${T.line}`, padding: "8px 6px",
+                        opacity: past ? 0.5 : 1,
+                        background: focused ? T.panel2 : "transparent",
+                        borderLeft: `3px solid ${focused ? T.gold : "transparent"}`,
+                        borderRadius: 2,
+                      }}>
+                        {/* 1段目: 日付 時刻 タグ シナリオ名 探索者リンク */}
+                        <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+                          <span style={{ fontFamily: mono, fontSize: 12, color: T.dim, minWidth: 92 }}>{dateLabel}</span>
+                          {ev.time && <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{ev.time}</span>}
+                          <span style={{ fontFamily: mono, fontSize: 10, color: "#fff", background: EVENT_CATS[ev.cat] || T.dim, padding: "1px 6px", borderRadius: 8 }}>{ev.cat}</span>
+                          {ev.cat === "TRPG" && ev.role && (
+                            <span style={{ fontFamily: mono, fontSize: 10, color: "#fff", background: ev.role === "GM" ? T.gold : T.green, padding: "1px 6px", borderRadius: 8 }}>{ev.role}</span>
+                          )}
+                          <span style={{ fontFamily: serif, fontSize: 14, flex: 1, minWidth: 80 }}>{ev.title}{past && <span style={{ fontFamily: mono, fontSize: 10, color: T.dim }}> (終了)</span>}</span>
+                          {ch && (
+                            <span onClick={() => openEdit(ch)}
+                              style={{ fontFamily: serif, fontSize: 12, color: T.green, cursor: "pointer", textDecoration: "underline", whiteSpace: "nowrap" }}>
+                              {ch.name || "(名称未記入)"}{ev.role === "GM" ? "(KPC)" : ""} のシートへ
+                            </span>
+                          )}
+                        </div>
+                        {/* シナリオ名の下: リンク類 */}
+                        {(ev.discord || ev.url) && (
+                          <div style={{ paddingLeft: 102, marginTop: 3, display: "flex", gap: 14, alignItems: "baseline", flexWrap: "wrap" }}>
+                            {ev.discord && (
+                              <a href={ev.discord} target="_blank" rel="noreferrer"
+                                style={{ fontFamily: mono, fontSize: 11, color: "#5865F2", textDecoration: "none" }}>💬 Discord ↗</a>
+                            )}
+                            {ev.url && (
+                              <a href={ev.url} target="_blank" rel="noreferrer"
+                                style={{ fontFamily: mono, fontSize: 11, color: T.green, textDecoration: "none" }}>{linkLabel(ev.url)} ↗</a>
+                            )}
+                          </div>
+                        )}
+                        {/* 2段目: 操作を1行右寄せ(クリックで開閉) */}
+                        <div style={{ marginTop: focused ? 8 : 0, maxHeight: focused ? 120 : 0, overflow: "hidden", transition: "max-height 0.2s, margin-top 0.2s" }}>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                            {ev.cat === "TRPG" && (
+                              ev.recorded ? (
+                                <span style={{ fontFamily: mono, fontSize: 11, color: T.dim, padding: "4px 10px" }}>転記済 ✓</span>
+                              ) : (
+                                <Btn small color={T.gold} border={T.gold} onClick={() => recordSessionFromEvent(ev)}>📔 日誌へ転記</Btn>
+                              )
+                            )}
+                            <Btn small onClick={() => {
+                              setNewEvent({ date: "", endDate: "", time: "", title: "", cat: "配信", repeat: "none", url: "", role: "PL", characterId: "", campaign: "", discord: "", ...ev });
+                              window.scrollTo({ top: 0, behavior: "smooth" });
+                            }}>✎ 編集</Btn>
+                            <Btn small color={T.red} border={T.red} onClick={() => persistEvents(events.filter((x) => x.id !== ev.id))}>× 削除</Btn>
+                          </div>
+                        </div>
+                        {/* 折りたたみ時の開くヒント */}
+                        {!focused && (
+                          <div onClick={() => setEventFocusId(ev.id)}
+                            style={{ marginTop: 2, fontFamily: mono, fontSize: 10, color: T.dim, cursor: "pointer", textAlign: "right" }}>
+                            ▾ 操作(転記・編集・削除)
+                          </div>
+                        )}
+                        {focused && (
+                          <div onClick={() => setEventFocusId(null)}
+                            style={{ marginTop: 6, fontFamily: mono, fontSize: 10, color: T.dim, cursor: "pointer", textAlign: "right" }}>
+                            ▴ 閉じる
+                          </div>
+                        )}
+                      </div>
+                    );
+                  };
+
+                  const sorted = [...inMonth].sort((a, b) => repDay(a) - repDay(b));
+                  const camps = [...new Set(sorted.map((e) => e.campaign).filter(Boolean))];
+                  const solo = sorted.filter((e) => !e.campaign);
+                  return (
+                    <React.Fragment>
+                      {camps.map((cp) => {
+                        const items = sorted.filter((e) => e.campaign === cp);
+                        const allItems = events.filter((e) => e.campaign === cp);
+                        const done = allItems.filter((e) => e.recorded).length;
+                        return (
+                          <div key={cp} style={{ marginBottom: 10, border: `1px solid ${T.line}`, borderLeft: `4px solid ${T.gold}`, borderRadius: 2, padding: "8px 12px", background: T.panel }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+                              <span style={{ fontFamily: serif, fontSize: 15, color: T.gold }}>📖 {cp}</span>
+                              <span style={{ fontFamily: mono, fontSize: 10, color: T.dim }}>通算 全{allItems.length}回 / 記録済 {done}</span>
+                            </div>
+                            {items.map(renderRow)}
+                          </div>
+                        );
+                      })}
+                      {solo.map(renderRow)}
+                    </React.Fragment>
+                  );
+                })()}
+              </Section>
+            </div>
+          );
+        })()}
+
+        {/* ===== セッション日誌 ===== */}
+        {view === "journal" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ fontFamily: serif, fontSize: 22 }}>セッション日誌 <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{journal.length} 件</span></div>
+              <Btn color={T.green} border={T.green} onClick={() => setJDraft(blankJournalEntry())}>+ 記録を書く</Btn>
+            </div>
+
+            {jDraft && (
+              <Section title={journal.some((x) => x.id === jDraft.id) ? "記録を編集 EDIT ENTRY" : "新しい記録 NEW ENTRY"}>
+                <div style={{ display: "grid", gap: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "auto 2fr 1fr", gap: 12, alignItems: "end" }}>
+                    <div>
+                      <Label>日付</Label>
+                      <input type="date" value={jDraft.date}
+                        onChange={(e) => setJDraft({ ...jDraft, date: e.target.value })}
+                        style={{ ...inputStyle, fontFamily: mono, width: 155 }} />
+                    </div>
+                    <Field label="シナリオ名" value={jDraft.scenario}
+                      onChange={(v) => setJDraft({ ...jDraft, scenario: v })} />
+                    <div>
+                      <Label>探索者(名前で検索可)</Label>
+                      <CharPicker characters={characters} value={jDraft.characterId}
+                        onChange={(id) => setJDraft({ ...jDraft, characterId: id })}
+                        width="100%" noneLabel="(なし / GM等)" />
+                    </div>
+                  </div>
+                  <Field label="同卓者" value={jDraft.party}
+                    onChange={(v) => setJDraft({ ...jDraft, party: v })}
+                    placeholder="KP: 〇〇 / PL: △△(探索者名)、□□ など" />
+                  <Area label="エンディング" rows={2} value={jDraft.ending}
+                    onChange={(v) => setJDraft({ ...jDraft, ending: v })}
+                    placeholder="生還 / ロスト / END-B など、結末の記録" />
+                  <Area label="後遺症" rows={2} value={jDraft.aftermath}
+                    onChange={(v) => setJDraft({ ...jDraft, aftermath: v })}
+                    placeholder="不定の狂気、SAN減少、負傷、得たもの など" />
+                  <Area label="その他メモ" rows={3} value={jDraft.memo}
+                    onChange={(v) => setJDraft({ ...jDraft, memo: v })}
+                    placeholder="印象的なロールプレイ、名言、反省点 など" />
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Btn color={T.green} border={T.green} onClick={saveJournal}>保存する</Btn>
+                    <Btn onClick={() => setJDraft(null)}>キャンセル</Btn>
+                  </div>
+                </div>
+              </Section>
+            )}
+
+            {journal.length === 0 && !jDraft && (
+              <div style={{ border: `1px dashed ${T.line}`, padding: 40, textAlign: "center", color: T.dim, fontFamily: serif, background: T.panel }}>
+                まだ日誌がありません。「+ 記録を書く」から最初のセッションを記録しましょう。
+              </div>
+            )}
+
+            <div style={{ display: "grid", gap: 12 }}>
+              {[...journal]
+                .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
+                .map((j) => {
+                  const ch = charById(j.characterId);
+                  const focused = j.id === journalFocusId;
+                  return (
+                    <div key={j.id} style={{
+                      background: T.panel, border: `1px solid ${focused ? T.gold : T.line}`,
+                      borderLeft: `4px solid ${focused ? T.gold : T.line}`,
+                      boxShadow: focused ? `0 0 0 1px ${T.gold}` : "0 1px 3px rgba(46,42,35,0.08)",
+                      borderRadius: 2, padding: 16,
+                    }}>
+                      <div style={{ display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
+                        <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{j.date || "日付不明"}</span>
+                        <span style={{ fontFamily: serif, fontSize: 18, flex: 1 }}>{j.scenario || "(シナリオ名未記入)"}</span>
+                        {ch && (
+                          <span onClick={() => openEdit(ch)}
+                            style={{ fontFamily: serif, fontSize: 13, color: T.green, cursor: "pointer", textDecoration: "underline" }}>
+                            {ch.name || "(名称未記入)"} のシートへ
+                          </span>
+                        )}
+                        <Btn small onClick={() => { setJournalFocusId(j.id); setJDraft({ ...j }); window.scrollTo({ top: 0, behavior: "smooth" }); }}>✎ 編集</Btn>
+                        <button title="削除"
+                          onClick={() => { if (confirm("この記録を削除しますか?")) persistJournal(journal.filter((x) => x.id !== j.id)); }}
+                          style={{ background: "transparent", border: "none", color: T.red, cursor: "pointer", fontFamily: mono }}>×</button>
+                      </div>
+                      {(j.party || j.ending || j.aftermath || j.memo) && (
+                        <div style={{ marginTop: 10, display: "grid", gap: 6, fontFamily: serif, fontSize: 13.5, lineHeight: 1.7 }}>
+                          {j.party && (
+                            <div><span style={{ fontFamily: mono, fontSize: 10, color: T.dim, letterSpacing: 1 }}>同卓者 </span>{j.party}</div>
+                          )}
+                          {j.ending && (
+                            <div><span style={{ fontFamily: mono, fontSize: 10, color: T.gold, letterSpacing: 1 }}>エンディング </span>{j.ending}</div>
+                          )}
+                          {j.aftermath && (
+                            <div><span style={{ fontFamily: mono, fontSize: 10, color: T.red, letterSpacing: 1 }}>後遺症 </span>{j.aftermath}</div>
+                          )}
+                          {j.memo && (
+                            <div style={{ whiteSpace: "pre-wrap" }}><span style={{ fontFamily: mono, fontSize: 10, color: T.dim, letterSpacing: 1 }}>メモ </span>{j.memo}</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        )}
+
+        {/* ===== 視聴リスト(YouTube) ===== */}
+        {view === "watch" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ fontFamily: serif, fontSize: 22 }}>視聴リスト <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{watch.length} 件</span></div>
+            </div>
+
+            {/* 再生中プレーヤー */}
+            {playing && (
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ position: "relative", paddingTop: "56.25%", background: "#000", borderRadius: 2, overflow: "hidden", border: `1px solid ${T.line}` }}>
+                  <iframe src={playing} title="player" allowFullScreen
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: 0 }} />
+                </div>
+                <div style={{ textAlign: "right", marginTop: 6 }}>
+                  <Btn small onClick={() => setPlaying(null)}>プレーヤーを閉じる</Btn>
+                </div>
+              </div>
+            )}
+
+            {/* 追加フォーム */}
+            <Section title="動画・再生リストを追加 ADD VIDEO / PLAYLIST">
+              <div style={{ fontFamily: serif, fontSize: 12.5, color: T.dim, marginBottom: 8, lineHeight: 1.7 }}>
+                YouTubeの動画URL・再生リストURLのどちらでも貼り付けられます(例: <span style={{ fontFamily: mono }}>youtube.com/playlist?list=…</span>)。再生リストはプレーヤー内で連続再生されます。
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 180 }}>
+                  <Field label="タイトル(任意)" value={newWatch.title}
+                    onChange={(v) => setNewWatch({ ...newWatch, title: v })} />
+                </div>
+                <div style={{ flex: 2, minWidth: 240 }}>
+                  <Field label="YouTube URL" value={newWatch.url}
+                    onChange={(v) => setNewWatch({ ...newWatch, url: v })}
+                    placeholder="https://www.youtube.com/watch?v=… または …/playlist?list=…" />
+                </div>
+                <Btn small color={T.green} border={T.green} onClick={() => {
+                  const yt = parseYouTube(newWatch.url);
+                  if (!yt) { alert("YouTubeのURLを認識できませんでした。"); return; }
+                  persistWatch([{ id: "w" + Date.now().toString(36), title: newWatch.title.trim(), url: newWatch.url, ...yt }, ...watch]);
+                  setNewWatch({ title: "", url: "" });
+                }}>+ 追加</Btn>
+              </div>
+            </Section>
+
+            {watch.length === 0 && (
+              <div style={{ border: `1px dashed ${T.line}`, padding: 40, textAlign: "center", color: T.dim, fontFamily: serif, background: T.panel }}>
+                まだ登録がありません。お気に入りの配信や再生リストを追加しましょう。
+              </div>
+            )}
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}>
+              {watch.map((w) => (
+                <div key={w.id} style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 2, overflow: "hidden", boxShadow: "0 1px 3px rgba(46,42,35,0.08)" }}>
+                  <div onClick={() => setPlaying(w.embed)}
+                    style={{ position: "relative", paddingTop: "56.25%", background: w.thumb ? `center/cover no-repeat url(${w.thumb})` : T.panel2, cursor: "pointer" }}>
+                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <span style={{ fontSize: 34, color: "#fff", textShadow: "0 1px 6px rgba(0,0,0,0.6)" }}>▶</span>
+                    </div>
+                    {w.listId && (
+                      <span style={{ position: "absolute", right: 6, bottom: 6, fontFamily: mono, fontSize: 9, color: "#fff", background: "rgba(0,0,0,0.7)", padding: "2px 6px", borderRadius: 3 }}>
+                        ☰ 再生リスト
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ padding: 10 }}>
+                    <div style={{ fontFamily: serif, fontSize: 14, marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {w.title || (w.listId ? "再生リスト" : "動画")}
+                    </div>
+                    <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+                      <span onClick={() => setPlaying(w.embed)}
+                        style={{ fontFamily: mono, fontSize: 11, color: T.green, cursor: "pointer" }}>▶ 再生</span>
+                      <a href={w.url} target="_blank" rel="noreferrer"
+                        style={{ fontFamily: mono, fontSize: 11, color: T.dim, textDecoration: "none" }}>YouTubeで開く ↗</a>
+                      <button onClick={() => persistWatch(watch.filter((x) => x.id !== w.id))} title="削除"
+                        style={{ marginLeft: "auto", background: "transparent", border: "none", color: T.red, cursor: "pointer", fontFamily: mono }}>×</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ===== ポスト集(X / Twitter) ===== */}
+        {view === "posts" && (() => {
+          const allTags = [...new Set(posts.flatMap((p) => p.tags || []))].sort();
+          const shown = postFilter ? posts.filter((p) => (p.tags || []).includes(postFilter)) : posts;
+          return (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                <div style={{ fontFamily: serif, fontSize: 22 }}>ポスト集 <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{posts.length} 件</span></div>
+              </div>
+
+              <Section title="ポストを追加 ADD POST(Xの投稿URL)">
+                <div style={{ fontFamily: serif, fontSize: 12.5, color: T.dim, marginBottom: 8, lineHeight: 1.7 }}>
+                  Xの個別ポストのURL(<span style={{ fontFamily: mono }}>x.com/ユーザー名/status/…</span>)を貼り付けてください。タグは「,」区切りで複数付けられます(例: 探索者名、シナリオ名など)。
+                </div>
+                <div style={{ display: "grid", gap: 10 }}>
+                  <Field label="ポストURL" value={newPost.url}
+                    onChange={(v) => setNewPost({ ...newPost, url: v })}
+                    placeholder="https://x.com/username/status/1234567890" />
+                  <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <Field label="タグ(, 区切り)" value={newPost.tags}
+                        onChange={(v) => setNewPost({ ...newPost, tags: v })}
+                        placeholder="探索者A, 悪霊の家, 名シーン" />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <Field label="メモ(任意)" value={newPost.memo}
+                        onChange={(v) => setNewPost({ ...newPost, memo: v })} />
+                    </div>
+                    <Btn small color={T.green} border={T.green} onClick={() => {
+                      const x = parseXPost(newPost.url);
+                      if (!x) { alert("XのポストURLを認識できませんでした。"); return; }
+                      const tags = newPost.tags.split(",").map((t) => t.trim()).filter(Boolean);
+                      persistPosts([{ id: "p" + Date.now().toString(36), ...x, url: x.canonical, tags, memo: newPost.memo.trim() }, ...posts]);
+                      setNewPost({ url: "", tags: "", memo: "" });
+                    }}>+ 追加</Btn>
+                  </div>
+                  {(() => {
+                    const cur = newPost.tags.split(",").map((t) => t.trim()).filter(Boolean);
+                    const addTag = (nm) => { if (!cur.includes(nm)) setNewPost({ ...newPost, tags: [...cur, nm].join(", ") }); };
+                    const usedTags = [...new Set(posts.flatMap((p) => p.tags || []))].sort();
+                    const unusedTags = usedTags.filter((t) => !cur.includes(t));
+                    return (
+                      <div style={{ display: "grid", gap: 6 }}>
+                        {unusedTags.length > 0 && (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
+                            <span style={{ fontFamily: mono, fontSize: 11, color: T.dim, marginRight: 2 }}>既存タグ:</span>
+                            {unusedTags.map((t) => (
+                              <span key={t} onClick={() => addTag(t)}
+                                style={{ cursor: "pointer", fontFamily: mono, fontSize: 10, color: T.gold, background: T.panel2, border: `1px solid ${T.line}`, padding: "2px 8px", borderRadius: 9 }}>
+                                + {t}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {characters.length > 0 && (
+                          <div style={{ fontFamily: mono, fontSize: 11, color: T.dim }}>
+                            探索者タグを追加:
+                            {characters.slice(0, 12).map((c) => (
+                              <span key={c.id} onClick={() => addTag(c.name || "(名称未記入)")}
+                                style={{ cursor: "pointer", color: T.green, marginLeft: 8 }}>
+                                #{c.name || "?"}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </Section>
+
+              {/* タグ絞り込み */}
+              {allTags.length > 0 && (
+                <div style={{ marginBottom: 14, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                  <span style={{ fontFamily: mono, fontSize: 11, color: T.dim, marginRight: 4 }}>タグ:</span>
+                  <span onClick={() => setPostFilter("")}
+                    style={{ cursor: "pointer", fontFamily: mono, fontSize: 11, padding: "3px 10px", borderRadius: 10, border: `1px solid ${postFilter === "" ? T.gold : T.line}`, color: postFilter === "" ? T.gold : T.dim }}>
+                    すべて ({posts.length})
+                  </span>
+                  {allTags.map((t) => {
+                    const n = posts.filter((p) => (p.tags || []).includes(t)).length;
+                    return (
+                      <span key={t} onClick={() => setPostFilter(t === postFilter ? "" : t)}
+                        style={{ cursor: "pointer", fontFamily: mono, fontSize: 11, padding: "3px 10px", borderRadius: 10, border: `1px solid ${postFilter === t ? T.gold : T.line}`, color: postFilter === t ? T.gold : T.paper, background: postFilter === t ? T.panel2 : "transparent" }}>
+                        {t} ({n})
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+
+              {posts.length === 0 && (
+                <div style={{ border: `1px dashed ${T.line}`, padding: 40, textAlign: "center", color: T.dim, fontFamily: serif, background: T.panel }}>
+                  まだポストがありません。残しておきたいXの投稿を登録しましょう。
+                </div>
+              )}
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16, alignItems: "start" }}>
+                {shown.map((p) => (
+                  <div key={p.id} style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 2, padding: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6, gap: 8 }}>
+                      <span style={{ fontFamily: mono, fontSize: 11, color: T.dim }}>@{p.user}</span>
+                      <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+                        <a href={p.canonical} target="_blank" rel="noreferrer"
+                          style={{ fontFamily: mono, fontSize: 11, color: T.green, textDecoration: "none" }}>Xで開く ↗</a>
+                        <button onClick={() => persistPosts(posts.filter((x) => x.id !== p.id))} title="削除"
+                          style={{ background: "transparent", border: "none", color: T.red, cursor: "pointer", fontFamily: mono }}>×</button>
+                      </div>
+                    </div>
+                    {p.memo && <div style={{ fontFamily: serif, fontSize: 13, marginBottom: 6 }}>{p.memo}</div>}
+                    <XEmbed post={p} />
+                    {(p.tags || []).length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8 }}>
+                        {p.tags.map((t) => (
+                          <span key={t} onClick={() => setPostFilter(t)}
+                            style={{ cursor: "pointer", fontFamily: mono, fontSize: 10, color: T.gold, background: T.panel2, border: `1px solid ${T.line}`, padding: "1px 7px", borderRadius: 9 }}>
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ===== 編集 ===== */}
+        {view === "edit" && draft && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18, flexWrap: "wrap", gap: 8 }}>
+              <Btn onClick={() => setView("list")} small>← 名簿に戻る</Btn>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {savedFlash && <span style={{ fontFamily: mono, fontSize: 11, color: T.green }}>保存しました</span>}
+                <Btn onClick={() => { setIoOpen(!ioOpen); setIoMsg(""); }} small color={T.gold} border={T.gold}>
+                  ⇄ ココフォリア連携
+                </Btn>
+                <Btn onClick={saveDraft} color={T.green} border={T.green}>保存する</Btn>
+              </div>
+            </div>
+
+            {ioOpen && (
+              <Section title="ココフォリア連携 IMPORT / EXPORT">
+                <div style={{ fontSize: 13, color: T.dim, fontFamily: serif, marginBottom: 8, lineHeight: 1.7 }}>
+                  読み込み: いあきゃら等で出力したココフォリア用JSONを貼り付けて「読み込む」。<br />
+                  書き出し: 「JSONを書き出す」を押すと、ココフォリアの盤面にそのまま貼り付けられる形式が出力されます。
+                </div>
+                <textarea value={ioText} rows={6} onChange={(e) => setIoText(e.target.value)}
+                  placeholder='{"kind":"character","data":{...}} の形式のJSONをここに貼り付け'
+                  style={{ ...inputStyle, fontFamily: mono, fontSize: 12, lineHeight: 1.5, resize: "vertical" }} />
+                <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <Btn onClick={doImport} small color={T.green} border={T.green}>↓ 読み込む</Btn>
+                  <Btn onClick={doExport} small color={T.gold} border={T.gold}>↑ JSONを書き出す</Btn>
+                  {ioMsg && <span style={{ fontFamily: serif, fontSize: 12, color: T.green }}>{ioMsg}</span>}
+                </div>
+              </Section>
+            )}
+
+            <Section title="基本情報 PROFILE"
+              right={
+                <select value={draft.edition} onChange={(e) => changeEdition(e.target.value)}
+                  style={{ ...inputStyle, width: 110, padding: "5px 6px", fontSize: 13, fontFamily: mono }}>
+                  {Object.entries(RULESETS).map(([k, r]) => (
+                    <option key={k} value={k}>{r.label}</option>
+                  ))}
+                </select>
+              }>
+              <div style={{ display: "flex", gap: 14 }}>
+                {draft.iconUrl && (
+                  <img src={draft.iconUrl} alt="" onError={(e) => { e.target.style.display = "none"; }}
+                    style={{ width: 84, height: 84, objectFit: "cover", objectPosition: "center top", borderRadius: 2, border: `2px solid ${draft.color || T.line}`, flexShrink: 0 }} />
+                )}
+                <div style={{ flex: 1, display: "grid", gap: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "2fr 2fr 1fr", gap: 12 }}>
+                    <Field label="名前 NAME" value={draft.name} onChange={(v) => setDraft({ ...draft, name: v })} />
+                    <Field label="職業 OCCUPATION" value={draft.occupation} onChange={(v) => setDraft({ ...draft, occupation: v })} />
+                    <Field label="年齢 AGE" value={draft.age} onChange={(v) => setDraft({ ...draft, age: v })} />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 2fr auto", gap: 12 }}>
+                    <Field label="性別 SEX" value={draft.gender} onChange={(v) => setDraft({ ...draft, gender: v })} />
+                    <Field label="出身 ORIGIN" value={draft.origin} onChange={(v) => setDraft({ ...draft, origin: v })} />
+                    <Field label="アイコンURL" value={draft.iconUrl} onChange={(v) => setDraft({ ...draft, iconUrl: v })} />
+                    <div>
+                      <Label>イメージカラー</Label>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(draft.color) ? draft.color : "#d4a017"}
+                          onChange={(e) => setDraft({ ...draft, color: e.target.value })}
+                          title="探索者のイメージカラー(カードの縁やココフォリアに反映)"
+                          style={{ width: 44, height: 38, padding: 2, border: `1px solid ${T.line}`, borderRadius: 2, background: T.panel2, cursor: "pointer" }} />
+                        <span style={{ fontFamily: mono, fontSize: 11, color: T.dim }}>{draft.color}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", gap: 12 }}>
+                    <Field label="キャラシURL(いあきゃら等)" value={draft.externalUrl} onChange={(v) => setDraft({ ...draft, externalUrl: v })} />
+                    <div>
+                      <Label>誕生日(月)</Label>
+                      <input type="number" min="1" max="12" value={draft.birthday.month} placeholder="6"
+                        onChange={(e) => setDraft({ ...draft, birthday: { ...draft.birthday, month: e.target.value } })}
+                        style={{ ...inputStyle, fontFamily: mono }} />
+                    </div>
+                    <div>
+                      <Label>誕生日(日)</Label>
+                      <input type="number" min="1" max="31" value={draft.birthday.day} placeholder="13"
+                        onChange={(e) => setDraft({ ...draft, birthday: { ...draft.birthday, day: e.target.value } })}
+                        style={{ ...inputStyle, fontFamily: mono }} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Section>
+
+            <Section title="能力値 CHARACTERISTICS"
+              right={
+                <Btn small color={T.gold} border={T.gold}
+                  onClick={() => {
+                    const ab = {};
+                    ruleset.abilities.forEach((a) => { ab[a.key] = roll(a.dice); });
+                    setDraft({ ...draft, abilities: ab });
+                  }}>⚂ 全て振り直す</Btn>
+              }>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 10 }}>
+                {ruleset.abilities.map((a) => (
+                  <div key={a.key} style={{ background: T.panel2, border: `1px solid ${T.line}`, padding: 10, borderRadius: 2 }}>
+                    <div style={{ fontFamily: mono, fontSize: 11, color: T.gold }}>{a.key}</div>
+                    <div style={{ fontSize: 11, color: T.dim, fontFamily: serif }}>{a.name}</div>
+                    <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                      <input type="number" value={draft.abilities[a.key] ?? ""}
+                        onChange={(e) => setAb(a.key, e.target.value)}
+                        style={{ width: "100%", background: T.bg, border: `1px solid ${T.line}`, color: T.paper, fontFamily: mono, fontSize: 18, padding: "4px 6px", borderRadius: 2, outline: "none" }} />
+                      <button title={a.hint} onClick={() => setAb(a.key, roll(a.dice))}
+                        style={{ background: T.panel2, border: `1px solid ${T.line}`, color: T.dim, fontFamily: mono, fontSize: 11, cursor: "pointer", borderRadius: 2, padding: "0 7px" }}>⚂</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ marginTop: 16, borderTop: `1px dashed ${T.line}`, paddingTop: 12 }}>
+                <Label>自動計算 DERIVED(HP/MP/SANは現在値を編集可)</Label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "10px 22px", fontFamily: mono, fontSize: 13, alignItems: "center" }}>
+                  {ruleset.derive(draft.abilities).map((d) => {
+                    const tracked = d.key in draft.current;
+                    return (
+                      <span key={d.key} style={{ color: d.key === "SAN" ? T.red : T.paper, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ color: T.dim, fontSize: 11 }}>{d.name} </span>
+                        {tracked ? (
+                          <React.Fragment>
+                            <input type="number"
+                              value={draft.current[d.key]}
+                              placeholder={String(d.value)}
+                              onChange={(e) => setDraft({ ...draft, current: { ...draft.current, [d.key]: e.target.value } })}
+                              style={{ width: 52, background: T.panel2, border: `1px solid ${T.line}`, color: "inherit", fontFamily: mono, fontSize: 13, padding: "2px 4px", borderRadius: 2, outline: "none" }} />
+                            <span style={{ color: T.dim }}>/ {d.value}</span>
+                          </React.Fragment>
+                        ) : (<b>{d.value}</b>)}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            </Section>
+
+            <Section title="技能 SKILLS(初期値から変更したものは真鍮色で表示)">
+              {ruleset.skillCategories.map((cat) => (
+                <div key={cat.name} style={{ marginBottom: 14 }}>
+                  <div style={{ fontFamily: serif, fontSize: 13, color: T.gold, borderBottom: `1px dashed ${T.line}`, paddingBottom: 4, marginBottom: 8 }}>
+                    {cat.name}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: "6px 12px" }}>
+                    {cat.skills.map((s) => {
+                      const name = normName(s.n);
+                      const init = skillInit(s, draft.abilities);
+                      const overridden = name in draft.skills;
+                      return (
+                        <div key={name} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                          <span style={{ flex: 1, fontFamily: serif, color: overridden ? T.paper : T.dim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={name}>
+                            {name}
+                          </span>
+                          <span style={{ fontFamily: mono, fontSize: 10, color: T.dim }}>{init}</span>
+                          <input type="number" value={overridden ? draft.skills[name] : ""} placeholder={String(init)}
+                            onChange={(e) => setSkill(name, e.target.value)}
+                            style={{
+                              width: 48, background: T.panel2,
+                              border: `1px solid ${overridden ? T.gold : T.line}`,
+                              color: overridden ? T.gold : T.dim,
+                              fontWeight: overridden ? 700 : 400,
+                              fontFamily: mono, fontSize: 13, padding: "2px 4px", borderRadius: 2, outline: "none",
+                            }} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+
+              <div>
+                <div style={{ fontFamily: serif, fontSize: 13, color: T.gold, borderBottom: `1px dashed ${T.line}`, paddingBottom: 4, marginBottom: 8 }}>
+                  固有・追加技能(芸術の専門分野、ほかの言語(英語) など)
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: "6px 12px", marginBottom: 10 }}>
+                  {extraSkills.map((name) => (
+                    <div key={name} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                      <span style={{ flex: 1, fontFamily: serif, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={name}>{name}</span>
+                      <input type="number" value={draft.skills[name]}
+                        onChange={(e) => setSkill(name, e.target.value === "" ? 0 : e.target.value)}
+                        style={{ width: 48, background: T.panel2, border: `1px solid ${T.gold}`, color: T.gold, fontWeight: 700, fontFamily: mono, fontSize: 13, padding: "2px 4px", borderRadius: 2, outline: "none" }} />
+                      <button onClick={() => setSkill(name, "")} title="削除"
+                        style={{ background: "transparent", border: "none", color: T.red, cursor: "pointer", fontFamily: mono }}>×</button>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <input value={newSkill.name} placeholder="技能名"
+                    onChange={(e) => setNewSkill({ ...newSkill, name: e.target.value })}
+                    style={{ ...inputStyle, width: 200, fontSize: 13, padding: "5px 8px" }} />
+                  <input type="number" value={newSkill.value} placeholder="値"
+                    onChange={(e) => setNewSkill({ ...newSkill, value: e.target.value })}
+                    style={{ ...inputStyle, width: 70, fontFamily: mono, fontSize: 13, padding: "5px 8px" }} />
+                  <Btn small onClick={() => {
+                    const n = normName(newSkill.name);
+                    if (!n) return;
+                    setSkill(n, num(newSkill.value));
+                    setNewSkill({ name: "", value: "" });
+                  }}>+ 追加</Btn>
+                </div>
+              </div>
+            </Section>
+
+            <Section title="プロフィール帳 PERSONAL FILE">
+              <div style={{ display: "grid", gap: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+                  <Field label="身長" value={draft.profile.height} onChange={(v) => setProf("height", v)} placeholder="172cm" />
+                  <Field label="体重" value={draft.profile.weight} onChange={(v) => setProf("weight", v)} placeholder="60kg" />
+                  <Field label="髪" value={draft.profile.hair} onChange={(v) => setProf("hair", v)} placeholder="黒・癖毛" />
+                  <Field label="瞳" value={draft.profile.eyes} onChange={(v) => setProf("eyes", v)} placeholder="焦げ茶" />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12 }}>
+                  <Field label="一人称" value={draft.profile.firstPerson} onChange={(v) => setProf("firstPerson", v)} placeholder="僕 / 私 / 俺" />
+                  <Field label="口調・話し方" value={draft.profile.speech} onChange={(v) => setProf("speech", v)} placeholder="丁寧語。緊張すると早口になる" />
+                </div>
+                <Area label="性格 PERSONALITY" value={draft.profile.personality} onChange={(v) => setProf("personality", v)} rows={2} />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <Area label="好きなもの" value={draft.profile.likes} onChange={(v) => setProf("likes", v)} rows={2} />
+                  <Area label="嫌いなもの・苦手" value={draft.profile.dislikes} onChange={(v) => setProf("dislikes", v)} rows={2} />
+                </div>
+                <Area label="信念・目標 BELIEF" value={draft.profile.belief} onChange={(v) => setProf("belief", v)} rows={2} />
+                <Area label="交友関係・大切な人 RELATIONS" value={draft.profile.relations} onChange={(v) => setProf("relations", v)} rows={2} />
+                <Area label="来歴・バックストーリー BACKSTORY" rows={6} value={draft.backstory}
+                  onChange={(v) => setDraft({ ...draft, backstory: v })}
+                  placeholder="生い立ち、探索者になった経緯、恐怖の体験など…" />
+                <Area label="所持品・財産 ITEMS" rows={3} value={draft.items} onChange={(v) => setDraft({ ...draft, items: v })} />
+                <Area label="メモ NOTES" rows={3} value={draft.memo} onChange={(v) => setDraft({ ...draft, memo: v })} />
+              </div>
+            </Section>
+
+            <Section title="関係者 CONTACTS(同卓した探索者など)">
+              <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                {draft.contacts.length === 0 && (
+                  <div style={{ fontFamily: serif, fontSize: 13, color: T.dim }}>まだ記録がありません。</div>
+                )}
+                {draft.contacts.map((p) => (
+                  <div key={p.id} style={{
+                    display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap",
+                    background: T.panel2, border: `1px solid ${T.line}`, padding: "8px 10px", borderRadius: 2,
+                  }}>
+                    <span style={{ fontFamily: serif, fontSize: 15 }}>{p.name}</span>
+                    <span style={{ fontFamily: serif, fontSize: 13, color: T.dim, flex: 1, minWidth: 120 }}>{p.note}</span>
+                    {p.url && (
+                      <a href={p.url} target="_blank" rel="noreferrer"
+                        style={{ fontFamily: mono, fontSize: 11, color: T.green, textDecoration: "none" }}>
+                        キャラシ ↗
+                      </a>
+                    )}
+                    <button title="削除"
+                      onClick={() => setDraft({ ...draft, contacts: draft.contacts.filter((x) => x.id !== p.id) })}
+                      style={{ background: "transparent", border: "none", color: T.red, cursor: "pointer", fontFamily: mono }}>×</button>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 2fr auto", gap: 8, alignItems: "end" }}>
+                <Field label="名前" value={newContact.name} onChange={(v) => setNewContact({ ...newContact, name: v })} />
+                <Field label="メモ(関係・印象など)" value={newContact.note} onChange={(v) => setNewContact({ ...newContact, note: v })} />
+                <Field label="URL(いあきゃら等)" value={newContact.url} onChange={(v) => setNewContact({ ...newContact, url: v })} />
+                <Btn small onClick={() => {
+                  if (!newContact.name.trim()) return;
+                  setDraft({ ...draft, contacts: [...draft.contacts, { id: "c" + Date.now().toString(36), ...newContact }] });
+                  setNewContact({ name: "", note: "", url: "" });
+                }}>+ 追加</Btn>
+              </div>
+            </Section>
+
+            <Section title="セッション記録 SESSION LOG"
+              right={
+                <Btn small color={T.gold} border={T.gold}
+                  onClick={() => { setJDraft({ ...blankJournalEntry(), characterId: draft.id }); setView("journal"); }}>
+                  📔 日誌を書く
+                </Btn>
+              }>
+              {journal.filter((j) => j.characterId === draft.id).length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontFamily: mono, fontSize: 10, color: T.gold, letterSpacing: 1, marginBottom: 6 }}>📔 日誌のある記録</div>
+                  <div style={{ display: "grid", gap: 4 }}>
+                    {journal.filter((j) => j.characterId === draft.id)
+                      .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
+                      .map((j) => (
+                        <div key={j.id} style={{ display: "flex", gap: 14, alignItems: "baseline", borderBottom: `1px dashed ${T.line}`, padding: "5px 0" }}>
+                          <span style={{ fontFamily: mono, fontSize: 12, color: T.dim, minWidth: 96 }}>{j.date || "日付不明"}</span>
+                          <span style={{ fontFamily: serif, fontSize: 14, flex: 1 }}>
+                            {j.scenario}
+                            {j.ending && <span style={{ color: T.dim, fontSize: 12 }}> — {j.ending.length > 24 ? j.ending.slice(0, 24) + "…" : j.ending}</span>}
+                          </span>
+                          <span onClick={() => { setJournalFocusId(j.id); setView("journal"); }}
+                            style={{ fontFamily: serif, fontSize: 12, color: T.green, cursor: "pointer", textDecoration: "underline" }}>
+                            📔 日誌を開く
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                  <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, letterSpacing: 1, margin: "12px 0 0" }}>簡易記録</div>
+                </div>
+              )}
+              <div style={{ display: "grid", gap: 4, marginBottom: 12 }}>
+                {draft.sessions.length === 0 && (
+                  <div style={{ fontFamily: serif, fontSize: 13, color: T.dim }}>まだ記録がありません。</div>
+                )}
+                {[...draft.sessions]
+                  .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
+                  .map((s) => (
+                    <div key={s.id} style={{ display: "flex", gap: 14, alignItems: "baseline", borderBottom: `1px dashed ${T.line}`, padding: "5px 0" }}>
+                      <span style={{ fontFamily: mono, fontSize: 12, color: T.dim, minWidth: 96 }}>{s.date || "日付不明"}</span>
+                      <span style={{ fontFamily: serif, fontSize: 14, flex: 1 }}>{s.scenario}</span>
+                      <button title="削除"
+                        onClick={() => setDraft({ ...draft, sessions: draft.sessions.filter((x) => x.id !== s.id) })}
+                        style={{ background: "transparent", border: "none", color: T.red, cursor: "pointer", fontFamily: mono }}>×</button>
+                    </div>
+                  ))}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, alignItems: "end" }}>
+                <div>
+                  <Label>日付</Label>
+                  <input type="date" value={newSession.date}
+                    onChange={(e) => setNewSession({ ...newSession, date: e.target.value })}
+                    style={{ ...inputStyle, fontFamily: mono }} />
+                </div>
+                <Field label="シナリオ名" value={newSession.scenario} onChange={(v) => setNewSession({ ...newSession, scenario: v })} />
+                <Btn small onClick={() => {
+                  if (!newSession.scenario.trim()) return;
+                  setDraft({ ...draft, sessions: [...draft.sessions, { id: "s" + Date.now().toString(36), ...newSession }] });
+                  setNewSession({ date: "", scenario: "" });
+                }}>+ 追加</Btn>
+              </div>
+            </Section>
+
+            <div style={{ marginTop: 18, textAlign: "right" }}>
+              <Btn small color={T.red} border={T.red} onClick={() => removeCharacter(draft.id)}>
+                このファイルを破棄する
+              </Btn>
+            </div>
+          </div>
+        )}
+      </main>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
