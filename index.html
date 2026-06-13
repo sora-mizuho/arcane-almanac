@@ -1598,22 +1598,37 @@ function App() {
                         borderLeft: `3px solid ${focused ? T.gold : "transparent"}`,
                         borderRadius: 2,
                       }}>
-                        {/* 1段目: 日付 時刻 タグ シナリオ名 探索者リンク */}
+                        {/* 1段目: 日付 時刻 タグ(スマホはシナリオ名を別行に) */}
                         <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-                          <span style={{ fontFamily: mono, fontSize: 12, color: T.dim, minWidth: 92 }}>{dateLabel}</span>
+                          <span style={{ fontFamily: mono, fontSize: 12, color: T.dim, minWidth: isMobile ? "auto" : 92 }}>{dateLabel}</span>
                           {ev.time && <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{ev.time}</span>}
                           <span style={{ fontFamily: mono, fontSize: 10, color: "#fff", background: EVENT_CATS[ev.cat] || T.dim, padding: "1px 6px", borderRadius: 8 }}>{ev.cat}</span>
                           {ev.cat === "TRPG" && ev.role && (
                             <span style={{ fontFamily: mono, fontSize: 10, color: "#fff", background: ev.role === "GM" ? T.gold : T.green, padding: "1px 6px", borderRadius: 8 }}>{ev.role}</span>
                           )}
-                          <span style={{ fontFamily: serif, fontSize: 14, flex: 1, minWidth: 80 }}>{ev.title}{past && <span style={{ fontFamily: mono, fontSize: 10, color: T.dim }}> (終了)</span>}</span>
-                          {ch && (
+                          {!isMobile && (
+                            <span style={{ fontFamily: serif, fontSize: 14, flex: 1, minWidth: 80 }}>{ev.title}{past && <span style={{ fontFamily: mono, fontSize: 10, color: T.dim }}> (終了)</span>}</span>
+                          )}
+                          {!isMobile && ch && (
                             <span onClick={() => openEdit(ch)}
                               style={{ fontFamily: serif, fontSize: 12, color: T.green, cursor: "pointer", textDecoration: "underline", whiteSpace: "nowrap" }}>
                               {ch.name || "(名称未記入)"}{ev.role === "GM" ? "(KPC)" : ""} のシートへ
                             </span>
                           )}
                         </div>
+                        {/* スマホ: シナリオ名を独立した行に(折り返し可) */}
+                        {isMobile && (
+                          <div style={{ fontFamily: serif, fontSize: 15, marginTop: 4, lineHeight: 1.4 }}>
+                            {ev.title}{past && <span style={{ fontFamily: mono, fontSize: 10, color: T.dim }}> (終了)</span>}
+                          </div>
+                        )}
+                        {/* スマホ: 探索者リンクを次の行に */}
+                        {isMobile && ch && (
+                          <div onClick={() => openEdit(ch)}
+                            style={{ fontFamily: serif, fontSize: 12, color: T.green, cursor: "pointer", textDecoration: "underline", marginTop: 2 }}>
+                            {ch.name || "(名称未記入)"}{ev.role === "GM" ? "(KPC)" : ""} のシートへ
+                          </div>
+                        )}
                         {/* シナリオ名の下: リンク類 */}
                         {(ev.discord || ev.url) && (
                           <div style={{ paddingLeft: 102, marginTop: 3, display: "flex", gap: 14, alignItems: "baseline", flexWrap: "wrap" }}>
