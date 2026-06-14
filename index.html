@@ -953,11 +953,13 @@ function App() {
   /* GMシート */
   const [gmSessions, setGmSessions] = useState(() => gmStore.load());
   const [gmDraft, setGmDraft] = useState(null);
+  const [gmViewId, setGmViewId] = useState(null);
   const persistGmSessions = (list) => { setGmSessions(list); gmStore.save(list); };
   const saveGmDraft = () => {
     if (!gmDraft) return;
     const exists = gmSessions.some(s => s.id === gmDraft.id);
     persistGmSessions(exists ? gmSessions.map(s => s.id === gmDraft.id ? gmDraft : s) : [gmDraft, ...gmSessions]);
+    setGmViewId(gmDraft.id);
     setGmDraft(null);
   };
 
@@ -2711,7 +2713,8 @@ function App() {
         {/* ===== GMシート ===== */}
         {view === "gm" && (
           <div>
-            {!gmDraft ? (
+            {/* ── 一覧 ── */}
+            {!gmDraft && !gmViewId && (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
                   <div style={{ fontFamily: serif, fontSize: 22 }}>GMシート <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{gmSessions.length} 件</span></div>
@@ -2721,7 +2724,7 @@ function App() {
                   <div style={{ fontFamily: serif, fontSize: 14, color: T.dim, textAlign: "center", padding: "48px 0", fontStyle: "italic" }}>GMシートはありません</div>
                 )}
                 {gmSessions.map(s => (
-                  <div key={s.id} onClick={() => { setGmDraft({ ...s, players: s.players ? s.players.map(p => ({ ...p })) : [] }); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                  <div key={s.id} onClick={() => { setGmViewId(s.id); window.scrollTo({ top: 0, behavior: "smooth" }); }}
                     style={{ background: T.cardBg, border: `1px solid ${T.line}`, borderLeft: `4px solid ${T.gold}`, borderRadius: 4, padding: "14px 16px", marginBottom: 10, cursor: "pointer" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 6 }}>
                       <div style={{ fontFamily: serif, fontSize: 16, fontWeight: "bold", color: T.text }}>{s.title || "無題のセッション"}</div>
@@ -2733,20 +2736,87 @@ function App() {
                     </div>
                     {s.scenarioTitle && <div style={{ fontFamily: serif, fontSize: 13, color: T.dim, marginTop: 4 }}>📖 {s.scenarioTitle}</div>}
                     {s.players && s.players.length > 0 && (
-                      <div style={{ fontFamily: mono, fontSize: 11, color: T.dim, marginTop: 6 }}>
-                        👥 {s.players.map(p => p.plName || "?").join(" / ")}
-                      </div>
+                      <div style={{ fontFamily: mono, fontSize: 11, color: T.dim, marginTop: 6 }}>👥 {s.players.map(p => p.plName || "?").join(" / ")}</div>
                     )}
                   </div>
                 ))}
               </>
-            ) : (
+            )}
+
+            {/* ── 閲覧 ── */}
+            {!gmDraft && gmViewId && (() => {
+              const s = gmSessions.find(s => s.id === gmViewId);
+              if (!s) { setGmViewId(null); return null; }
+              return (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 8 }}>
+                    <Btn onClick={() => setGmViewId(null)} small>← 一覧に戻る</Btn>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <Btn small color={T.red} border={T.red} onClick={() => { if (window.confirm("削除しますか？")) { persistGmSessions(gmSessions.filter(x => x.id !== s.id)); setGmViewId(null); } }}>削除</Btn>
+                      <Btn color={T.gold} border={T.gold} onClick={() => { setGmDraft({ ...s, players: s.players ? s.players.map(p => ({ ...p })) : [] }); window.scrollTo({ top: 0, behavior: "smooth" }); }}>編集</Btn>
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: 18 }}>
+                    <div style={{ fontFamily: serif, fontSize: 24, fontWeight: "bold", color: T.text, marginBottom: 6 }}>{s.title || "無題のセッション"}</div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      {s.date && <span style={{ fontFamily: mono, fontSize: 11, color: T.gold, border: `1px solid ${T.gold}`, borderRadius: 3, padding: "2px 10px" }}>📅 {s.date}</span>}
+                      {s.discordUrl && <a href={s.discordUrl} target="_blank" rel="noreferrer" style={{ fontFamily: mono, fontSize: 11, color: "#5865F2", border: "1px solid #5865F2", borderRadius: 3, padding: "2px 10px", textDecoration: "none" }}>Discord ↗</a>}
+                      {s.cocofoliaUrl && <a href={s.cocofoliaUrl} target="_blank" rel="noreferrer" style={{ fontFamily: mono, fontSize: 11, color: T.green, border: `1px solid ${T.green}`, borderRadius: 3, padding: "2px 10px", textDecoration: "none" }}>ここふぉりあ ↗</a>}
+                    </div>
+                  </div>
+
+                  {(s.scenarioTitle || s.scenarioUrl) && (
+                    <Section title="シナリオ">
+                      {s.scenarioTitle && <div style={{ fontFamily: serif, fontSize: 15, color: T.text, marginBottom: 6 }}>📖 {s.scenarioTitle}</div>}
+                      {s.scenarioUrl && <a href={s.scenarioUrl} target="_blank" rel="noreferrer" style={{ fontFamily: mono, fontSize: 11, color: T.green, textDecoration: "none" }}>{s.scenarioUrl} ↗</a>}
+                    </Section>
+                  )}
+
+                  {s.players && s.players.length > 0 && (
+                    <Section title="メンバー・探索者情報">
+                      {s.players.map((pl, i) => (
+                        <div key={pl.id} style={{ background: T.bg, border: `1px solid ${T.line}`, borderRadius: 4, padding: "12px 14px", marginBottom: 10 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+                            <span style={{ fontFamily: serif, fontSize: 14, fontWeight: "bold", color: T.text }}>
+                              PL{i + 1} {pl.plName || "—"}
+                            </span>
+                            {pl.snsUrl && <a href={pl.snsUrl} target="_blank" rel="noreferrer" style={{ fontFamily: mono, fontSize: 10, color: T.dim, textDecoration: "none" }}>SNS ↗</a>}
+                          </div>
+                          {(pl.charName || pl.iaUrl) && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: pl.ho ? 8 : 0, flexWrap: "wrap" }}>
+                              {pl.charName && <span style={{ fontFamily: serif, fontSize: 13, color: T.text }}>探索者: {pl.charName}</span>}
+                              {pl.iaUrl && <a href={pl.iaUrl} target="_blank" rel="noreferrer" style={{ fontFamily: mono, fontSize: 10, color: T.green, textDecoration: "none" }}>いあきゃら ↗</a>}
+                            </div>
+                          )}
+                          {pl.ho && (
+                            <div style={{ borderTop: `1px dashed ${T.line}`, paddingTop: 8, marginTop: 4 }}>
+                              <div style={{ fontFamily: mono, fontSize: 10, color: T.gold, marginBottom: 4 }}>HO</div>
+                              <div style={{ fontFamily: serif, fontSize: 13, color: T.text, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{pl.ho}</div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </Section>
+                  )}
+
+                  {s.memo && (
+                    <Section title="メモ">
+                      <div style={{ fontFamily: serif, fontSize: 14, color: T.text, lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{s.memo}</div>
+                    </Section>
+                  )}
+                </>
+              );
+            })()}
+
+            {/* ── 編集 ── */}
+            {gmDraft && (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 8 }}>
-                  <Btn onClick={() => setGmDraft(null)} small>← 一覧に戻る</Btn>
+                  <Btn onClick={() => { setGmDraft(null); }} small>← {gmViewId ? "閲覧に戻る" : "一覧に戻る"}</Btn>
                   <div style={{ display: "flex", gap: 8 }}>
                     {gmSessions.some(s => s.id === gmDraft.id) && (
-                      <Btn small color={T.red} border={T.red} onClick={() => { if (window.confirm("削除しますか？")) { persistGmSessions(gmSessions.filter(s => s.id !== gmDraft.id)); setGmDraft(null); } }}>削除</Btn>
+                      <Btn small color={T.red} border={T.red} onClick={() => { if (window.confirm("削除しますか？")) { persistGmSessions(gmSessions.filter(s => s.id !== gmDraft.id)); setGmDraft(null); setGmViewId(null); } }}>削除</Btn>
                     )}
                     <Btn color={T.green} border={T.green} onClick={saveGmDraft}>保存する</Btn>
                   </div>
