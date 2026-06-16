@@ -903,6 +903,7 @@ function App() {
   const [journal, setJournal] = useState(() => journalStore.load());
   const [jDraft, setJDraft] = useState(null); // nullなら入力フォーム非表示
   const [journalFocusId, setJournalFocusId] = useState(null);
+  const [journalSearch, setJournalSearch] = useState("");
   const persistJournal = (list) => { setJournal(list); journalStore.save(list); };
 
   /* 視聴リスト(YouTube) */
@@ -943,6 +944,7 @@ function App() {
   const [plans, setPlans] = useState(() => planStore.load());
   const [planDraft, setPlanDraft] = useState(null);
   const persistPlans = (list) => { setPlans(list); planStore.save(list); };
+  const [planSearch, setPlanSearch] = useState("");
   const savePlanDraft = () => {
     if (!planDraft) return;
     const exists = plans.some(p => p.id === planDraft.id);
@@ -1511,20 +1513,33 @@ function App() {
                   <div style={{ marginTop: 10 }}><Btn small onClick={() => setView("memo")}>メモへ →</Btn></div>
                 </Section>
 
-                <Section title="SCENARIO — シナリオ管理">
-                  {scenarios.length === 0 ? (
-                    <div style={{ fontFamily: serif, fontSize: 13, color: T.dim }}>登録はありません</div>
-                  ) : (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 6 }}>
-                      {SCENARIO_STATUSES.filter((s) => scStats[s] > 0).map((s) => (
-                        <div key={s} style={{ textAlign: "center" }}>
-                          <div style={{ fontFamily: mono, fontSize: 22, color: SCENARIO_STATUS_COLORS[s] }}>{scStats[s]}</div>
-                          <div style={{ fontFamily: mono, fontSize: 10, color: T.dim }}>{s}</div>
+                <Section title="TODO">
+                  {(() => {
+                    const active = todos.filter(t => !t.done);
+                    const lvInfo = getTodoLevelInfo(todoStats.totalPoints || 0);
+                    return (
+                      <>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                          <span style={{ fontFamily: mono, fontSize: 11, color: T.gold }}>Lv.{lvInfo.lv} {lvInfo.label}</span>
+                          <span style={{ fontFamily: mono, fontSize: 11, color: T.dim }}>{todos.filter(t => t.done).length}/{todos.length} 完了</span>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                  <div style={{ marginTop: 10 }}><Btn small onClick={() => setView("scenario")}>シナリオ一覧へ →</Btn></div>
+                        {active.length === 0 ? (
+                          <div style={{ fontFamily: serif, fontSize: 13, color: T.dim }}>未完了のTODOはありません</div>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
+                            {active.slice(0, 4).map(t => (
+                              <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ width: 8, height: 8, borderRadius: "50%", background: TODO_CAT_COLORS[t.category] || T.dim, flexShrink: 0, display: "inline-block" }} />
+                                <span style={{ fontFamily: serif, fontSize: 13, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</span>
+                              </div>
+                            ))}
+                            {active.length > 4 && <div style={{ fontFamily: mono, fontSize: 10, color: T.dim }}>他 {active.length - 4} 件…</div>}
+                          </div>
+                        )}
+                        <div style={{ marginTop: 8 }}><Btn small onClick={() => setView("todo")}>TODO一覧へ →</Btn></div>
+                      </>
+                    );
+                  })()}
                 </Section>
               </div>
             </div>
@@ -2073,6 +2088,15 @@ function App() {
               </Section>
             )}
 
+            {journal.length > 0 && (
+              <input
+                placeholder="🔍 シナリオ・日付・同卓者・メモで検索…"
+                value={journalSearch}
+                onChange={e => setJournalSearch(e.target.value)}
+                style={{ ...inputStyle, width: "100%", marginBottom: 12, boxSizing: "border-box" }}
+              />
+            )}
+
             {journal.length === 0 && !jDraft && (
               <div style={{ border: `1px dashed ${T.line}`, padding: 40, textAlign: "center", color: T.dim, fontFamily: serif, background: T.panel }}>
                 まだ日誌がありません。「+ 記録を書く」から最初のセッションを記録しましょう。
@@ -2081,6 +2105,12 @@ function App() {
 
             <div style={{ display: "grid", gap: 12 }}>
               {[...journal]
+                .filter(j => {
+                  if (!journalSearch.trim()) return true;
+                  const q = journalSearch.trim().toLowerCase();
+                  return [j.scenario, j.date, j.party, j.memo, j.ending, j.aftermath]
+                    .some(f => (f || "").toLowerCase().includes(q));
+                })
                 .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
                 .map((j) => {
                   const ch = charById(j.characterId);
@@ -2642,10 +2672,23 @@ function App() {
                 <div style={{ fontFamily: serif, fontSize: 13, color: T.dim, marginBottom: 14, lineHeight: 1.7 }}>
                   確定していないが一緒に遊ぶ予定のシナリオ・メンバーのメモ
                 </div>
+                {plans.length > 0 && (
+                  <input
+                    placeholder="🔍 シナリオ・メンバー・メモで検索…"
+                    value={planSearch}
+                    onChange={e => setPlanSearch(e.target.value)}
+                    style={{ ...inputStyle, width: "100%", marginBottom: 12, boxSizing: "border-box" }}
+                  />
+                )}
                 {plans.length === 0 && (
                   <div style={{ fontFamily: serif, fontSize: 14, color: T.dim, textAlign: "center", padding: "48px 0", fontStyle: "italic" }}>プランはありません</div>
                 )}
-                {plans.map(p => (
+                {plans.filter(p => {
+                  if (!planSearch.trim()) return true;
+                  const q = planSearch.trim().toLowerCase();
+                  return [p.scenarioTitle, p.members, p.memo]
+                    .some(f => (f || "").toLowerCase().includes(q));
+                }).map(p => (
                   <div key={p.id} onClick={() => { setPlanDraft({ ...p }); window.scrollTo({ top: 0, behavior: "smooth" }); }}
                     style={{ background: T.cardBg, border: `1px solid ${T.line}`, borderLeft: `4px solid #3A6EA5`, borderRadius: 4, padding: "14px 16px", marginBottom: 10, cursor: "pointer" }}>
                     <div style={{ fontFamily: serif, fontSize: 16, fontWeight: "bold", color: T.text, marginBottom: 4 }}>
