@@ -476,6 +476,20 @@ const blankGmSession = () => ({
   createdAt: new Date().toISOString(),
 });
 
+/* ---------- 体調記録の保存 ---------- */
+const HEALTH_KEY = "coc-health";
+const healthStore = {
+  load() { try { return JSON.parse(localStorage.getItem(HEALTH_KEY) || "{}"); } catch (e) { return {}; } },
+  save(data) { try { localStorage.setItem(HEALTH_KEY, JSON.stringify(data)); } catch (e) {} },
+};
+const ATTENDANCE_OPTS = ["出社", "在宅", "休み"];
+const ATTENDANCE_COLORS = { "出社": "#4A7C59", "在宅": "#3A6EA5", "休み": "#7A5050" };
+const blankHealthEntry = () => ({
+  morningPhysical: 0, morningMental: 0,
+  afternoonPhysical: 0, afternoonMental: 0,
+  attendance: null, memo: "",
+});
+
 const SCENARIO_STATUSES = ["積み", "未プレイ", "プレイ中", "プレイ済", "GM用"];
 const SCENARIO_STATUS_COLORS = {
   "積み": "#6E675A", "未プレイ": "#3A6EA5", "プレイ中": "#1F7A4D",
@@ -801,6 +815,22 @@ const Section = ({ title, children, right }) => (
   </section>
 );
 
+const HEALTH_ACCENT = "#6B9E9E";
+const HealthScore = ({ value, onChange }) => (
+  <div style={{ display: "flex", gap: 4 }}>
+    {[1,2,3,4,5].map(n => (
+      <button key={n} onClick={() => onChange(value === n ? 0 : n)}
+        style={{
+          width: 34, height: 34, borderRadius: 2, cursor: "pointer",
+          border: `1px solid ${n <= value ? HEALTH_ACCENT : T.line}`,
+          background: n <= value ? HEALTH_ACCENT : T.cardBg,
+          color: n <= value ? "#fff" : T.dim,
+          fontFamily: mono, fontSize: 13,
+        }}>{n}</button>
+    ))}
+  </div>
+);
+
 /* Xのポストを埋め込み表示(widgets.jsで描画) */
 function XEmbed({ post }) {
   const ref = useRef(null);
@@ -965,6 +995,14 @@ function App() {
     setGmDraft(null);
   };
 
+  /* 体調記録 */
+  const [health, setHealth] = useState(() => healthStore.load());
+  const [healthDate, setHealthDate] = useState(new Date().toISOString().slice(0, 10));
+  const persistHealth = (data) => { setHealth(data); healthStore.save(data); };
+  const setHealthField = (field, value) => {
+    persistHealth({ ...health, [healthDate]: { ...(health[healthDate] || blankHealthEntry()), [field]: value } });
+  };
+
   const saveJournal = () => {
     if (!jDraft || (!jDraft.date && !jDraft.scenario.trim())) return;
     const e = { ...jDraft, updatedAt: Date.now() };
@@ -1003,6 +1041,7 @@ function App() {
         if (data.todoStats) { const s = { totalPoints: 0, ...data.todoStats }; setTodoStats(s); todoStatsStore.save(s); }
         if (Array.isArray(data.gmSessions)) { setGmSessions(data.gmSessions); gmStore.save(data.gmSessions); }
         if (Array.isArray(data.plans)) { setPlans(data.plans); planStore.save(data.plans); }
+        if (data.health && typeof data.health === "object" && !Array.isArray(data.health)) { setHealth(data.health); healthStore.save(data.health); }
       }
       setSyncStatus("ok");
       hydratedRef.current = true;
@@ -1019,12 +1058,12 @@ function App() {
     if (pushTimer.current) clearTimeout(pushTimer.current);
     setSyncStatus("syncing");
     pushTimer.current = setTimeout(() => {
-      cloud.push({ characters, events, journal, watch, posts, memos, scenarios, todos, todoStats, gmSessions, plans })
+      cloud.push({ characters, events, journal, watch, posts, memos, scenarios, todos, todoStats, gmSessions, plans, health })
         .then((ok) => setSyncStatus(ok ? "ok" : "error"))
         .catch((e) => { console.error(e); setSyncStatus("error"); });
     }, 1200);
     return () => { if (pushTimer.current) clearTimeout(pushTimer.current); };
-  }, [characters, events, journal, watch, posts, memos, scenarios, todos, todoStats, gmSessions, plans, syncCode]);
+  }, [characters, events, journal, watch, posts, memos, scenarios, todos, todoStats, gmSessions, plans, health, syncCode]);
 
   const applySyncCode = (code) => {
     const c = code.trim();
@@ -1047,6 +1086,7 @@ function App() {
         if (data.todoStats) { const s = { totalPoints: 0, ...data.todoStats }; setTodoStats(s); todoStatsStore.save(s); }
         if (Array.isArray(data.gmSessions)) { setGmSessions(data.gmSessions); gmStore.save(data.gmSessions); }
         if (Array.isArray(data.plans)) { setPlans(data.plans); planStore.save(data.plans); }
+        if (data.health && typeof data.health === "object" && !Array.isArray(data.health)) { setHealth(data.health); healthStore.save(data.health); }
         setSyncStatus("ok");
       } else { setSyncStatus("ok"); }
     }).catch((e) => { console.error(e); setSyncStatus("error"); });
@@ -1283,6 +1323,7 @@ function App() {
             {navItem("todo", "☑", "TODO")}
             {navItem("plan", "📋", "プラン")}
             {navItem("gm", "🎲", "GMシート")}
+            {navItem("health", "🩺", "体調記録")}
             {isMobile && (
               <div onClick={() => setSyncOpen(true)}
                 style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 10px", cursor: "pointer", flex: "1 0 auto", minWidth: 64, color: syncStatus === "ok" ? T.green : syncStatus === "error" ? T.red : T.dim, fontFamily: serif, fontSize: 11 }}>
@@ -2953,6 +2994,113 @@ function App() {
             )}
           </div>
         )}
+
+        {/* ===== 体調記録 ===== */}
+        {view === "health" && (() => {
+          const today = new Date().toISOString().slice(0, 10);
+          const entry = health[healthDate] || blankHealthEntry();
+          const sortedDates = Object.keys(health).sort((a, b) => b.localeCompare(a));
+          return (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                <div style={{ fontFamily: serif, fontSize: 22 }}>体調記録 <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{Object.keys(health).length} 日</span></div>
+              </div>
+
+              <Section title="記録する日">
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <input type="date" value={healthDate} onChange={e => setHealthDate(e.target.value)}
+                    style={{ ...inputStyle, fontFamily: mono, width: 160 }} />
+                  {healthDate !== today && (
+                    <Btn small onClick={() => setHealthDate(today)}>今日に戻る</Btn>
+                  )}
+                </div>
+              </Section>
+
+              <Section title="午前">
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: mono, fontSize: 11, color: T.dim, minWidth: 52 }}>体調</span>
+                    <HealthScore value={entry.morningPhysical} onChange={v => setHealthField("morningPhysical", v)} />
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: mono, fontSize: 11, color: T.dim, minWidth: 52 }}>メンタル</span>
+                    <HealthScore value={entry.morningMental} onChange={v => setHealthField("morningMental", v)} />
+                  </div>
+                </div>
+              </Section>
+
+              <Section title="午後">
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: mono, fontSize: 11, color: T.dim, minWidth: 52 }}>体調</span>
+                    <HealthScore value={entry.afternoonPhysical} onChange={v => setHealthField("afternoonPhysical", v)} />
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: mono, fontSize: 11, color: T.dim, minWidth: 52 }}>メンタル</span>
+                    <HealthScore value={entry.afternoonMental} onChange={v => setHealthField("afternoonMental", v)} />
+                  </div>
+                </div>
+              </Section>
+
+              <Section title="出社記録">
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {ATTENDANCE_OPTS.map(opt => (
+                    <button key={opt}
+                      onClick={() => setHealthField("attendance", entry.attendance === opt ? null : opt)}
+                      style={{
+                        padding: "7px 20px", borderRadius: 2, cursor: "pointer",
+                        fontFamily: mono, fontSize: 12, letterSpacing: 1,
+                        border: `1px solid ${ATTENDANCE_COLORS[opt]}`,
+                        background: entry.attendance === opt ? ATTENDANCE_COLORS[opt] : "transparent",
+                        color: entry.attendance === opt ? "#fff" : ATTENDANCE_COLORS[opt],
+                      }}>{opt}</button>
+                  ))}
+                </div>
+              </Section>
+
+              <Section title="メモ">
+                <textarea value={entry.memo || ""} rows={3}
+                  onChange={e => setHealthField("memo", e.target.value)}
+                  placeholder="今日のメモ…"
+                  style={{ ...inputStyle, resize: "vertical", lineHeight: 1.7 }} />
+              </Section>
+
+              {sortedDates.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, letterSpacing: 2, marginBottom: 10 }}>— HISTORY —</div>
+                  <div style={{ display: "grid", gap: 6 }}>
+                    {sortedDates.map(d => {
+                      const e = health[d];
+                      if (!e.morningPhysical && !e.morningMental && !e.afternoonPhysical && !e.afternoonMental && !e.attendance && !e.memo) return null;
+                      const isSelected = d === healthDate;
+                      return (
+                        <div key={d} onClick={() => setHealthDate(d)}
+                          style={{
+                            background: T.panel, borderRadius: 2, padding: "10px 14px", cursor: "pointer",
+                            border: `1px solid ${isSelected ? HEALTH_ACCENT : T.line}`,
+                            borderLeft: `4px solid ${isSelected ? HEALTH_ACCENT : T.line}`,
+                          }}>
+                          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                            <span style={{ fontFamily: mono, fontSize: 12, color: T.dim, minWidth: 92 }}>{d}</span>
+                            {e.attendance && (
+                              <span style={{ fontFamily: mono, fontSize: 10, border: `1px solid ${ATTENDANCE_COLORS[e.attendance]}`, color: ATTENDANCE_COLORS[e.attendance], padding: "1px 7px", borderRadius: 2 }}>{e.attendance}</span>
+                            )}
+                            <span style={{ fontFamily: mono, fontSize: 11, color: T.dim }}>
+                              午前 体{e.morningPhysical || "—"} 心{e.morningMental || "—"}　午後 体{e.afternoonPhysical || "—"} 心{e.afternoonMental || "—"}
+                            </span>
+                            {e.memo && (
+                              <span style={{ fontFamily: serif, fontSize: 12, color: T.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.memo}</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ===== 編集 ===== */}
         {view === "edit" && draft && (
