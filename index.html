@@ -482,6 +482,7 @@ const healthStore = {
   load() { try { return JSON.parse(localStorage.getItem(HEALTH_KEY) || "{}"); } catch (e) { return {}; } },
   save(data) { try { localStorage.setItem(HEALTH_KEY, JSON.stringify(data)); } catch (e) {} },
 };
+const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
 const ATTENDANCE_OPTS = ["出社", "在宅", "休み"];
 const ATTENDANCE_COLORS = { "出社": "#4A7C59", "在宅": "#3A6EA5", "休み": "#7A5050" };
 const blankHealthEntry = () => ({
@@ -489,6 +490,19 @@ const blankHealthEntry = () => ({
   afternoonPhysical: 0, afternoonMental: 0,
   attendance: null, memo: "",
 });
+
+/* ---------- 探索者ネタ帳の保存 ---------- */
+const NETA_KEY = "coc-neta";
+const netaStore = {
+  load() { try { return JSON.parse(localStorage.getItem(NETA_KEY) || "[]"); } catch (e) { return []; } },
+  save(list) { try { localStorage.setItem(NETA_KEY, JSON.stringify(list)); } catch (e) {} },
+};
+const blankNeta = () => ({
+  id: "neta" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+  title: "", characterIds: [], memo: "", links: [],
+  createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+});
+const blankNetaLink = () => ({ id: "nl" + Date.now().toString(36), url: "", label: "" });
 
 const SCENARIO_STATUSES = ["積み", "未プレイ", "プレイ中", "プレイ済", "GM用"];
 const SCENARIO_STATUS_COLORS = {
@@ -895,6 +909,57 @@ function CharPicker({ characters, value, onChange, width = 200, noneLabel = "(�
   );
 }
 
+/* 探索者をタグ形式で複数選択するピッカー */
+function CharTagPicker({ characters, value, onChange }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const ql = q.trim().toLowerCase();
+  const selected = characters.filter(c => value.includes(c.id));
+  const candidates = characters.filter(c =>
+    !value.includes(c.id) &&
+    (ql === "" || [c.name, c.occupation].some(t => String(t || "").toLowerCase().includes(ql)))
+  );
+  const dropRow = { display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", cursor: "pointer", borderBottom: `1px solid ${T.line}` };
+  return (
+    <div>
+      {selected.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+          {selected.map(c => (
+            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 4, background: T.panel2, border: `1px solid ${T.green}`, borderRadius: 12, padding: "3px 8px 3px 6px" }}>
+              {c.iconUrl && <img src={c.iconUrl} alt="" onError={e => { e.target.style.display = "none"; }} style={{ width: 16, height: 16, objectFit: "cover", objectPosition: "top", borderRadius: 2, flexShrink: 0 }} />}
+              <span style={{ fontFamily: serif, fontSize: 12, color: T.green }}>{c.name || "(名称未記入)"}</span>
+              <button onMouseDown={e => { e.preventDefault(); onChange(value.filter(id => id !== c.id)); }}
+                style={{ background: "none", border: "none", color: T.dim, cursor: "pointer", fontFamily: mono, fontSize: 12, padding: "0 0 0 2px", lineHeight: 1 }}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ position: "relative" }}>
+        <input value={open ? q : ""} placeholder="探索者名で検索して追加…"
+          onFocus={() => { setOpen(true); setQ(""); }}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onChange={e => setQ(e.target.value)}
+          style={{ ...inputStyle, fontSize: 13 }} />
+        {open && (
+          <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 60, background: T.panel2, border: `1px solid ${T.line}`, maxHeight: 200, overflowY: "auto", boxShadow: "0 4px 14px rgba(46,42,35,0.2)" }}>
+            {candidates.map(c => (
+              <div key={c.id} onMouseDown={() => { onChange([...value, c.id]); setQ(""); }}
+                style={dropRow}>
+                {c.iconUrl && <img src={c.iconUrl} alt="" onError={e => { e.target.style.display = "none"; }} style={{ width: 20, height: 20, objectFit: "cover", objectPosition: "top", borderRadius: 2, flexShrink: 0 }} />}
+                <span style={{ fontFamily: serif, fontSize: 13, flex: 1 }}>{c.name || "(名称未記入)"}</span>
+                <span style={{ fontFamily: mono, fontSize: 10, color: T.dim }}>{c.occupation || ""}</span>
+              </div>
+            ))}
+            {candidates.length === 0 && (
+              <div style={{ padding: 8, fontFamily: serif, fontSize: 12, color: T.dim }}>{ql ? "該当なし" : "追加できる探索者はいません"}</div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ---------- 本体 ---------- */
 function App() {
   const [characters, setCharacters] = useState(() => store.load());
@@ -997,10 +1062,23 @@ function App() {
 
   /* 体調記録 */
   const [health, setHealth] = useState(() => healthStore.load());
-  const [healthDate, setHealthDate] = useState(new Date().toISOString().slice(0, 10));
+  const [healthDate, setHealthDate] = useState(() => localToday());
   const persistHealth = (data) => { setHealth(data); healthStore.save(data); };
   const setHealthField = (field, value) => {
     persistHealth({ ...health, [healthDate]: { ...(health[healthDate] || blankHealthEntry()), [field]: value } });
+  };
+
+  /* 探索者ネタ帳 */
+  const [netas, setNetas] = useState(() => netaStore.load());
+  const [netaDraft, setNetaDraft] = useState(null);
+  const [netaSearch, setNetaSearch] = useState("");
+  const persistNetas = (list) => { setNetas(list); netaStore.save(list); };
+  const saveNetaDraft = () => {
+    if (!netaDraft) return;
+    const updated = { ...netaDraft, updatedAt: new Date().toISOString() };
+    const exists = netas.some(n => n.id === updated.id);
+    persistNetas(exists ? netas.map(n => n.id === updated.id ? updated : n) : [updated, ...netas]);
+    setNetaDraft(null);
   };
 
   const saveJournal = () => {
@@ -1042,6 +1120,7 @@ function App() {
         if (Array.isArray(data.gmSessions)) { setGmSessions(data.gmSessions); gmStore.save(data.gmSessions); }
         if (Array.isArray(data.plans)) { setPlans(data.plans); planStore.save(data.plans); }
         if (data.health && typeof data.health === "object" && !Array.isArray(data.health)) { setHealth(data.health); healthStore.save(data.health); }
+        if (Array.isArray(data.netas)) { setNetas(data.netas); netaStore.save(data.netas); }
       }
       setSyncStatus("ok");
       hydratedRef.current = true;
@@ -1058,12 +1137,12 @@ function App() {
     if (pushTimer.current) clearTimeout(pushTimer.current);
     setSyncStatus("syncing");
     pushTimer.current = setTimeout(() => {
-      cloud.push({ characters, events, journal, watch, posts, memos, scenarios, todos, todoStats, gmSessions, plans, health })
+      cloud.push({ characters, events, journal, watch, posts, memos, scenarios, todos, todoStats, gmSessions, plans, health, netas })
         .then((ok) => setSyncStatus(ok ? "ok" : "error"))
         .catch((e) => { console.error(e); setSyncStatus("error"); });
     }, 1200);
     return () => { if (pushTimer.current) clearTimeout(pushTimer.current); };
-  }, [characters, events, journal, watch, posts, memos, scenarios, todos, todoStats, gmSessions, plans, health, syncCode]);
+  }, [characters, events, journal, watch, posts, memos, scenarios, todos, todoStats, gmSessions, plans, health, netas, syncCode]);
 
   const applySyncCode = (code) => {
     const c = code.trim();
@@ -1087,6 +1166,7 @@ function App() {
         if (Array.isArray(data.gmSessions)) { setGmSessions(data.gmSessions); gmStore.save(data.gmSessions); }
         if (Array.isArray(data.plans)) { setPlans(data.plans); planStore.save(data.plans); }
         if (data.health && typeof data.health === "object" && !Array.isArray(data.health)) { setHealth(data.health); healthStore.save(data.health); }
+        if (Array.isArray(data.netas)) { setNetas(data.netas); netaStore.save(data.netas); }
         setSyncStatus("ok");
       } else { setSyncStatus("ok"); }
     }).catch((e) => { console.error(e); setSyncStatus("error"); });
@@ -1323,6 +1403,7 @@ function App() {
             {navItem("todo", "☑", "TODO")}
             {navItem("plan", "📋", "プラン")}
             {navItem("gm", "🎲", "GMシート")}
+            {navItem("neta", "💡", "ネタ帳")}
             {navItem("health", "🩺", "体調記録")}
             {isMobile && (
               <div onClick={() => setSyncOpen(true)}
@@ -2186,10 +2267,16 @@ function App() {
                             <div><span style={{ fontFamily: mono, fontSize: 10, color: T.gold, letterSpacing: 1 }}>エンディング </span>{j.ending}</div>
                           )}
                           {j.aftermath && (
-                            <div><span style={{ fontFamily: mono, fontSize: 10, color: T.red, letterSpacing: 1 }}>後遺症 </span>{j.aftermath}</div>
+                            <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                              <span style={{ fontFamily: mono, fontSize: 10, color: T.red, letterSpacing: 1, flexShrink: 0, lineHeight: 1.7 }}>後遺症</span>
+                              <span style={{ whiteSpace: "pre-wrap" }}>{j.aftermath}</span>
+                            </div>
                           )}
                           {j.memo && (
-                            <div style={{ whiteSpace: "pre-wrap" }}><span style={{ fontFamily: mono, fontSize: 10, color: T.dim, letterSpacing: 1 }}>メモ </span>{j.memo}</div>
+                            <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                              <span style={{ fontFamily: mono, fontSize: 10, color: T.dim, letterSpacing: 1, flexShrink: 0, lineHeight: 1.7 }}>メモ</span>
+                              <span style={{ whiteSpace: "pre-wrap" }}>{j.memo}</span>
+                            </div>
                           )}
                         </div>
                       )}
@@ -2995,9 +3082,141 @@ function App() {
           </div>
         )}
 
+        {/* ===== 探索者ネタ帳 ===== */}
+        {view === "neta" && (
+          <div>
+            {!netaDraft ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                  <div style={{ fontFamily: serif, fontSize: 22 }}>探索者ネタ帳 <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{netas.length} 件</span></div>
+                  <Btn color={T.green} border={T.green} onClick={() => { setNetaDraft(blankNeta()); window.scrollTo({ top: 0, behavior: "smooth" }); }}>+ 追加</Btn>
+                </div>
+
+                {netas.length > 0 && (
+                  <input placeholder="🔍 タイトル・メモ・探索者名で検索…"
+                    value={netaSearch} onChange={e => setNetaSearch(e.target.value)}
+                    style={{ ...inputStyle, width: "100%", marginBottom: 12, boxSizing: "border-box" }} />
+                )}
+
+                {netas.length === 0 && (
+                  <div style={{ border: `1px dashed ${T.line}`, padding: 40, textAlign: "center", color: T.dim, fontFamily: serif, background: T.panel }}>
+                    ネタ帳はまだありません。「+ 追加」からメモを書きましょう。
+                  </div>
+                )}
+
+                {netas.filter(n => {
+                  if (!netaSearch.trim()) return true;
+                  const q = netaSearch.trim().toLowerCase();
+                  const charNames = n.characterIds.map(id => {
+                    const c = characters.find(c => c.id === id);
+                    return c ? (c.name || "") : "";
+                  }).join(" ");
+                  return [n.title, n.memo, charNames, ...(n.links || []).map(l => l.label + " " + l.url)]
+                    .some(f => (f || "").toLowerCase().includes(q));
+                }).map(n => {
+                  const charTags = n.characterIds.map(id => characters.find(c => c.id === id)).filter(Boolean);
+                  return (
+                    <div key={n.id}
+                      onClick={() => { setNetaDraft({ ...n, links: n.links ? n.links.map(l => ({ ...l })) : [] }); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                      style={{ background: T.cardBg, border: `1px solid ${T.line}`, borderLeft: `4px solid #8A6A9E`, borderRadius: 4, padding: "14px 16px", marginBottom: 10, cursor: "pointer" }}>
+                      {n.title && (
+                        <div style={{ fontFamily: serif, fontSize: 16, fontWeight: "bold", marginBottom: 6 }}>{n.title}</div>
+                      )}
+                      {charTags.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 6 }}>
+                          {charTags.map(c => (
+                            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 3, background: T.panel2, border: `1px solid ${T.green}`, borderRadius: 10, padding: "2px 8px 2px 5px" }}>
+                              {c.iconUrl && <img src={c.iconUrl} alt="" onError={e => { e.target.style.display = "none"; }} style={{ width: 14, height: 14, objectFit: "cover", objectPosition: "top", borderRadius: 2 }} />}
+                              <span style={{ fontFamily: serif, fontSize: 11, color: T.green }}>{c.name || "(名称未記入)"}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {n.memo && (
+                        <div style={{ fontFamily: serif, fontSize: 13, color: T.text, whiteSpace: "pre-wrap", overflow: "hidden", maxHeight: 72, lineHeight: 1.65 }}>{n.memo}</div>
+                      )}
+                      {n.links && n.links.filter(l => l.url).length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                          {n.links.filter(l => l.url).map(l => (
+                            <a key={l.id} href={l.url} target="_blank" rel="noreferrer"
+                              onClick={e => e.stopPropagation()}
+                              style={{ fontFamily: mono, fontSize: 11, color: T.green, textDecoration: "none", border: `1px solid ${T.line}`, padding: "2px 8px", borderRadius: 2 }}>
+                              {l.label || l.url.replace(/^https?:\/\//, "").slice(0, 30)}↗
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </>
+            ) : (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 8 }}>
+                  <Btn onClick={() => setNetaDraft(null)} small>← 一覧に戻る</Btn>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {netas.some(n => n.id === netaDraft.id) && (
+                      <Btn small color={T.red} border={T.red}
+                        onClick={() => { if (window.confirm("削除しますか？")) { persistNetas(netas.filter(n => n.id !== netaDraft.id)); setNetaDraft(null); } }}>削除</Btn>
+                    )}
+                    <Btn color={T.green} border={T.green} onClick={saveNetaDraft}>保存する</Btn>
+                  </div>
+                </div>
+
+                <Section title="タイトル（任意）">
+                  <input value={netaDraft.title} onChange={e => setNetaDraft({ ...netaDraft, title: e.target.value })}
+                    placeholder="タイトルや見出し…" style={inputStyle} />
+                </Section>
+
+                <Section title="探索者タグ">
+                  <CharTagPicker characters={characters} value={netaDraft.characterIds}
+                    onChange={ids => setNetaDraft({ ...netaDraft, characterIds: ids })} />
+                </Section>
+
+                <Section title="メモ">
+                  <textarea value={netaDraft.memo} rows={8}
+                    onChange={e => setNetaDraft({ ...netaDraft, memo: e.target.value })}
+                    placeholder="キャラクターのアイデア、設定メモ、気になった要素など…"
+                    style={{ ...inputStyle, resize: "vertical", lineHeight: 1.75 }} />
+                </Section>
+
+                <Section title="リンク（X のポスト・参考URL など）"
+                  right={<Btn small onClick={() => setNetaDraft({ ...netaDraft, links: [...(netaDraft.links || []), blankNetaLink()] })}>+ 追加</Btn>}>
+                  {(!netaDraft.links || netaDraft.links.length === 0) && (
+                    <div style={{ fontFamily: serif, fontSize: 13, color: T.dim }}>リンクはありません</div>
+                  )}
+                  {(netaDraft.links || []).map((lk, i) => (
+                    <div key={lk.id} style={{ display: "grid", gap: 6, marginBottom: 12 }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <input value={lk.label} onChange={e => {
+                            const ls = netaDraft.links.map((x, j) => j === i ? { ...x, label: e.target.value } : x);
+                            setNetaDraft({ ...netaDraft, links: ls });
+                          }} placeholder="ラベル（任意）"
+                          style={{ ...inputStyle, flex: 1 }} />
+                        <button onClick={() => setNetaDraft({ ...netaDraft, links: netaDraft.links.filter((_, j) => j !== i) })}
+                          style={{ background: "none", border: "none", color: T.red, cursor: "pointer", fontFamily: mono, fontSize: 16, flexShrink: 0 }}>×</button>
+                      </div>
+                      <input value={lk.url} onChange={e => {
+                          const ls = netaDraft.links.map((x, j) => j === i ? { ...x, url: e.target.value } : x);
+                          setNetaDraft({ ...netaDraft, links: ls });
+                        }} placeholder="https://x.com/..."
+                        style={{ ...inputStyle, fontFamily: mono, fontSize: 13 }} />
+                    </div>
+                  ))}
+                </Section>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+                  <Btn onClick={() => setNetaDraft(null)} small>キャンセル</Btn>
+                  <Btn color={T.green} border={T.green} onClick={saveNetaDraft}>保存する</Btn>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* ===== 体調記録 ===== */}
         {view === "health" && (() => {
-          const today = new Date().toISOString().slice(0, 10);
+          const today = localToday();
           const entry = health[healthDate] || blankHealthEntry();
           const sortedDates = Object.keys(health).sort((a, b) => b.localeCompare(a));
           return (
