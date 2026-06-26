@@ -469,9 +469,11 @@ const blankPlan = () => ({
   createdAt: new Date().toISOString(),
 });
 
+const GM_STATUSES = ["GM予定", "GM済み"];
+const GM_STATUS_COLORS = { "GM予定": "#3A6EA5", "GM済み": "#8A6A1C" };
 const blankGmSession = () => ({
   id: "gm" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-  title: "", date: "", scenarioTitle: "", scenarioUrl: "",
+  title: "", date: "", status: "GM予定", scenarioTitle: "", scenarioUrl: "",
   discordUrl: "", cocofoliaUrl: "", memo: "", players: [],
   createdAt: new Date().toISOString(),
 });
@@ -503,6 +505,92 @@ const blankNeta = () => ({
   createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
 });
 const blankNetaLink = () => ({ id: "nl" + Date.now().toString(36), url: "", label: "" });
+
+/* ---------- イラストギャラリーの保存 ---------- */
+const ILLUST_KEY = "coc-illust";
+const illustStore = {
+  load() { try { return JSON.parse(localStorage.getItem(ILLUST_KEY) || "[]"); } catch (e) { return []; } },
+  save(list) { try { localStorage.setItem(ILLUST_KEY, JSON.stringify(list)); } catch (e) {} },
+};
+
+/* 画像バイナリは IndexedDB に保存（localStorageの容量制限を回避） */
+const imageDB = (() => {
+  let _db = null;
+  const open = () => new Promise((res, rej) => {
+    if (_db) { res(_db); return; }
+    const req = indexedDB.open("coc-gallery-images", 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore("img");
+    req.onsuccess = e => { _db = e.target.result; res(_db); };
+    req.onerror = rej;
+  });
+  const tx = async (mode, fn) => { const d = await open(); return new Promise((res, rej) => { const t = d.transaction("img", mode); const s = t.objectStore("img"); const r = fn(s); r.onsuccess = () => res(r.result); r.onerror = rej; }); };
+  return {
+    get: (id) => tx("readonly", s => s.get(id)),
+    set: (id, data) => tx("readwrite", s => s.put(data, id)),
+    del: (id) => tx("readwrite", s => s.delete(id)),
+  };
+})();
+
+/* 再レンダリングを起こさないインメモリキャッシュ */
+const _imgCache = new Map();
+const loadCachedImage = (id) => {
+  if (!id) return Promise.resolve(null);
+  if (_imgCache.has(id)) return Promise.resolve(_imgCache.get(id));
+  return imageDB.get(id).then(d => { if (d) _imgCache.set(id, d); return d || null; });
+};
+const downloadDataUrl = (dataUrl, filename) => {
+  const a = document.createElement("a"); a.href = dataUrl; a.download = filename || "illust.jpg"; a.click();
+};
+
+/* 正方形コンテナ(objectFit:cover)での objectPosition を焦点座標から計算 */
+const computeObjPos = (thumbX, thumbY, natW, natH) => {
+  if (!natW || !natH) return `${thumbX}% ${thumbY}%`;
+  // 正方形コンテナ(1x1)に cover で収まる scale
+  const scale = Math.max(1 / natW, 1 / natH);
+  const rendW = natW * scale, rendH = natH * scale;
+  let posX = 50, posY = 50;
+  if (rendW > 1.0001) {
+    const overflow = rendW - 1;
+    posX = Math.max(0, Math.min(100, ((thumbX / 100 * rendW - 0.5) / overflow) * 100));
+  }
+  if (rendH > 1.0001) {
+    const overflow = rendH - 1;
+    posY = Math.max(0, Math.min(100, ((thumbY / 100 * rendH - 0.5) / overflow) * 100));
+  }
+  return `${posX.toFixed(1)}% ${posY.toFixed(1)}%`;
+};
+
+/* 画像ファイルをリサイズ＋圧縮して dataURL を返す */
+const compressImage = (file, maxPx = 1400, quality = 0.87) => new Promise(resolve => {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      let w = img.width, h = img.height;
+      if (w > maxPx || h > maxPx) {
+        if (w > h) { h = Math.round(h * maxPx / w); w = maxPx; }
+        else { w = Math.round(w * maxPx / h); h = maxPx; }
+      }
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      c.getContext("2d").drawImage(img, 0, 0, w, h);
+      resolve(c.toDataURL("image/jpeg", quality));
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+const blankIllustImage = () => ({
+  id: "img" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+  label: "", thumbX: 50, thumbY: 30,
+});
+const blankIllust = () => ({
+  id: "il" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+  title: "", characterIds: [], images: [],
+  artistName: "", artistSnsUrl: "", memo: "",
+  createdAt: new Date().toISOString(),
+});
 
 const SCENARIO_STATUSES = ["積み", "未プレイ", "プレイ中", "プレイ済", "GM用"];
 const SCENARIO_STATUS_COLORS = {
@@ -960,6 +1048,58 @@ function CharTagPicker({ characters, value, onChange }) {
   );
 }
 
+/* ギャラリーサムネイル（IntersectionObserver で遅延読み込み） */
+function GalleryThumb({ imgId, thumbX = 50, thumbY = 30, count }) {
+  const [src, setSrc] = React.useState(() => _imgCache.get(imgId) || null);
+  const [natSize, setNatSize] = React.useState(null);
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (src || !imgId) return;
+    const el = ref.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([e]) => {
+      if (!e.isIntersecting) return;
+      obs.disconnect();
+      loadCachedImage(imgId).then(d => { if (d) setSrc(d); });
+    }, { rootMargin: "200px" });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [imgId]);
+  const objPos = React.useMemo(
+    () => natSize ? computeObjPos(thumbX, thumbY, natSize.w, natSize.h) : `${thumbX}% ${thumbY}%`,
+    [thumbX, thumbY, natSize]
+  );
+  return (
+    <div ref={ref} style={{ position: "absolute", inset: 0, background: T.bg }}>
+      {src
+        ? <img src={src} alt=""
+            onLoad={e => setNatSize({ w: e.target.naturalWidth, h: e.target.naturalHeight })}
+            style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: objPos }} />
+        : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: T.dim, fontFamily: mono, fontSize: 26 }}>🖼</div>
+      }
+      {count > 1 && <div style={{ position: "absolute", bottom: 5, right: 5, background: "rgba(0,0,0,0.55)", color: "#fff", fontFamily: mono, fontSize: 10, padding: "2px 6px", borderRadius: 2 }}>+{count - 1}</div>}
+    </div>
+  );
+}
+
+/* 編集フォーム内のサムネイルプレビュー */
+function ThumbPreview({ src, thumbX = 50, thumbY = 30, size = 52 }) {
+  const imgRef = React.useRef(null);
+  const [objPos, setObjPos] = React.useState("50% 50%");
+  const recompute = React.useCallback(() => {
+    const el = imgRef.current;
+    if (!el || !el.naturalWidth) return;
+    setObjPos(computeObjPos(thumbX, thumbY, el.naturalWidth, el.naturalHeight));
+  }, [thumbX, thumbY]);
+  React.useEffect(() => { recompute(); }, [recompute]);
+  return (
+    <div style={{ width: size, height: size, flexShrink: 0, overflow: "hidden", borderRadius: 3, border: `1px solid ${T.line}`, background: T.bg }}>
+      {src && <img ref={imgRef} src={src} alt="" onLoad={recompute}
+        style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: objPos }} />}
+    </div>
+  );
+}
+
 /* ---------- 本体 ---------- */
 function App() {
   const [characters, setCharacters] = useState(() => store.load());
@@ -1051,6 +1191,8 @@ function App() {
   const [gmSessions, setGmSessions] = useState(() => gmStore.load());
   const [gmDraft, setGmDraft] = useState(null);
   const [gmViewId, setGmViewId] = useState(null);
+  const [gmTagFilter, setGmTagFilter] = useState("all");
+  const [gmSearch, setGmSearch] = useState("");
   const persistGmSessions = (list) => { setGmSessions(list); gmStore.save(list); };
   const saveGmDraft = () => {
     if (!gmDraft) return;
@@ -1079,6 +1221,60 @@ function App() {
     const exists = netas.some(n => n.id === updated.id);
     persistNetas(exists ? netas.map(n => n.id === updated.id ? updated : n) : [updated, ...netas]);
     setNetaDraft(null);
+  };
+
+  /* イラストギャラリー */
+  const [illusts, setIllusts] = useState(() => illustStore.load());
+  const [illustDraft, setIllustDraft] = useState(null);
+  const [illustSearch, setIllustSearch] = useState("");
+  const [illustCharFilter, setIllustCharFilter] = useState(null);
+  const [editImages, setEditImages] = useState({});
+  const [galleryKey, setGalleryKey] = useState(0);
+  const persistIllusts = (list) => { setIllusts(list); illustStore.save(list); };
+
+  /* 編集ドラフトが切り替わったら画像を一括ロード */
+  React.useEffect(() => {
+    if (!illustDraft) { setEditImages({}); return; }
+    (illustDraft.images || []).forEach(img => {
+      loadCachedImage(img.id).then(d => { if (d) setEditImages(prev => ({ ...prev, [img.id]: d })); });
+    });
+  }, [illustDraft?.id]);
+
+  const saveIllustDraft = () => {
+    if (!illustDraft) return;
+    const exists = illusts.some(il => il.id === illustDraft.id);
+    persistIllusts(exists ? illusts.map(il => il.id === illustDraft.id ? illustDraft : il) : [illustDraft, ...illusts]);
+    setIllustDraft(null);
+  };
+
+  /* ギャラリー画像エクスポート（IndexedDB → JSONファイル） */
+  const exportGalleryImages = async () => {
+    const allImgIds = illusts.flatMap(il => (il.images || []).map(img => img.id));
+    if (!allImgIds.length) { alert("エクスポートする画像がありません"); return; }
+    const entries = {};
+    for (const id of allImgIds) {
+      const data = await imageDB.get(id);
+      if (data) entries[id] = data;
+    }
+    if (!Object.keys(entries).length) { alert("保存された画像データが見つかりませんでした"); return; }
+    const blob = new Blob([JSON.stringify(entries)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "gallery-images.json"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  /* ギャラリー画像インポート（JSONファイル → IndexedDB + _imgCache） */
+  const importGalleryImages = async (file) => {
+    try {
+      const text = await file.text();
+      const entries = JSON.parse(text);
+      for (const [id, data] of Object.entries(entries)) {
+        _imgCache.set(id, data);
+        await imageDB.set(id, data);
+      }
+      setGalleryKey(k => k + 1);
+      alert(`${Object.keys(entries).length} 件の画像をインポートしました`);
+    } catch(e) { alert("インポートに失敗しました: " + e.message); }
   };
 
   const saveJournal = () => {
@@ -1121,6 +1317,7 @@ function App() {
         if (Array.isArray(data.plans)) { setPlans(data.plans); planStore.save(data.plans); }
         if (data.health && typeof data.health === "object" && !Array.isArray(data.health)) { setHealth(data.health); healthStore.save(data.health); }
         if (Array.isArray(data.netas)) { setNetas(data.netas); netaStore.save(data.netas); }
+        if (Array.isArray(data.illusts)) { setIllusts(data.illusts); illustStore.save(data.illusts); }
       }
       setSyncStatus("ok");
       hydratedRef.current = true;
@@ -1137,12 +1334,12 @@ function App() {
     if (pushTimer.current) clearTimeout(pushTimer.current);
     setSyncStatus("syncing");
     pushTimer.current = setTimeout(() => {
-      cloud.push({ characters, events, journal, watch, posts, memos, scenarios, todos, todoStats, gmSessions, plans, health, netas })
+      cloud.push({ characters, events, journal, watch, posts, memos, scenarios, todos, todoStats, gmSessions, plans, health, netas, illusts })
         .then((ok) => setSyncStatus(ok ? "ok" : "error"))
         .catch((e) => { console.error(e); setSyncStatus("error"); });
     }, 1200);
     return () => { if (pushTimer.current) clearTimeout(pushTimer.current); };
-  }, [characters, events, journal, watch, posts, memos, scenarios, todos, todoStats, gmSessions, plans, health, netas, syncCode]);
+  }, [characters, events, journal, watch, posts, memos, scenarios, todos, todoStats, gmSessions, plans, health, netas, illusts, syncCode]);
 
   const applySyncCode = (code) => {
     const c = code.trim();
@@ -1167,6 +1364,7 @@ function App() {
         if (Array.isArray(data.plans)) { setPlans(data.plans); planStore.save(data.plans); }
         if (data.health && typeof data.health === "object" && !Array.isArray(data.health)) { setHealth(data.health); healthStore.save(data.health); }
         if (Array.isArray(data.netas)) { setNetas(data.netas); netaStore.save(data.netas); }
+        if (Array.isArray(data.illusts)) { setIllusts(data.illusts); illustStore.save(data.illusts); }
         setSyncStatus("ok");
       } else { setSyncStatus("ok"); }
     }).catch((e) => { console.error(e); setSyncStatus("error"); });
@@ -1404,6 +1602,7 @@ function App() {
             {navItem("plan", "📋", "プラン")}
             {navItem("gm", "🎲", "GMシート")}
             {navItem("neta", "💡", "ネタ帳")}
+            {navItem("illust", "🖼", "ギャラリー")}
             {navItem("health", "🩺", "体調記録")}
             {isMobile && (
               <div onClick={() => setSyncOpen(true)}
@@ -2885,34 +3084,91 @@ function App() {
         {view === "gm" && (
           <div>
             {/* ── 一覧 ── */}
-            {!gmDraft && !gmViewId && (
-              <>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-                  <div style={{ fontFamily: serif, fontSize: 22 }}>GMシート <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{gmSessions.length} 件</span></div>
-                  <Btn color={T.green} border={T.green} onClick={() => { setGmDraft(blankGmSession()); window.scrollTo({ top: 0, behavior: "smooth" }); }}>+ 新規作成</Btn>
-                </div>
-                {gmSessions.length === 0 && (
-                  <div style={{ fontFamily: serif, fontSize: 14, color: T.dim, textAlign: "center", padding: "48px 0", fontStyle: "italic" }}>GMシートはありません</div>
-                )}
-                {gmSessions.map(s => (
-                  <div key={s.id} onClick={() => { setGmViewId(s.id); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-                    style={{ background: T.cardBg, border: `1px solid ${T.line}`, borderLeft: `4px solid ${T.gold}`, borderRadius: 4, padding: "14px 16px", marginBottom: 10, cursor: "pointer" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 6 }}>
-                      <div style={{ fontFamily: serif, fontSize: 16, fontWeight: "bold", color: T.text }}>{s.title || "無題のセッション"}</div>
-                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                        {s.date && <span style={{ fontFamily: mono, fontSize: 10, color: T.gold, border: `1px solid ${T.gold}`, borderRadius: 3, padding: "1px 7px" }}>{s.date}</span>}
-                        {s.discordUrl && <a href={s.discordUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ fontFamily: mono, fontSize: 10, color: "#5865F2", border: "1px solid #5865F2", borderRadius: 3, padding: "1px 7px", textDecoration: "none" }}>Discord</a>}
-                        {s.cocofoliaUrl && <a href={s.cocofoliaUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ fontFamily: mono, fontSize: 10, color: T.green, border: `1px solid ${T.green}`, borderRadius: 3, padding: "1px 7px", textDecoration: "none" }}>ここふぉりあ</a>}
-                      </div>
-                    </div>
-                    {s.scenarioTitle && <div style={{ fontFamily: serif, fontSize: 13, color: T.dim, marginTop: 4 }}>📖 {s.scenarioTitle}</div>}
-                    {s.players && s.players.length > 0 && (
-                      <div style={{ fontFamily: mono, fontSize: 11, color: T.dim, marginTop: 6 }}>👥 {s.players.map(p => p.plName || "?").join(" / ")}</div>
-                    )}
+            {!gmDraft && !gmViewId && (() => {
+              const gmFiltered = gmSessions
+                .filter(s => gmTagFilter === "all" || (s.status || "GM予定") === gmTagFilter)
+                .filter(s => {
+                  if (!gmSearch.trim()) return true;
+                  const q = gmSearch.trim().toLowerCase();
+                  const plNames = (s.players || []).map(p => p.plName || "").join(" ");
+                  const charNames = (s.players || []).map(p => p.charName || "").join(" ");
+                  return [s.title, s.scenarioTitle, plNames, charNames]
+                    .some(f => (f || "").toLowerCase().includes(q));
+                });
+              return (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ fontFamily: serif, fontSize: 22 }}>GMシート <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{gmSessions.length} 件</span></div>
+                    <Btn color={T.green} border={T.green} onClick={() => { setGmDraft(blankGmSession()); window.scrollTo({ top: 0, behavior: "smooth" }); }}>+ 新規作成</Btn>
                   </div>
-                ))}
-              </>
-            )}
+
+                  {/* タグフィルター */}
+                  <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+                    {["all", ...GM_STATUSES].map(tag => {
+                      const active = gmTagFilter === tag;
+                      const color = tag === "all" ? T.dim : GM_STATUS_COLORS[tag];
+                      return (
+                        <button key={tag} onClick={() => setGmTagFilter(tag)}
+                          style={{
+                            fontFamily: mono, fontSize: 11, letterSpacing: 1, cursor: "pointer",
+                            padding: "4px 12px", borderRadius: 2,
+                            border: `1px solid ${active ? color : T.line}`,
+                            background: active ? color : "transparent",
+                            color: active ? "#fff" : (tag === "all" ? T.dim : color),
+                          }}>{tag === "all" ? "すべて" : tag}</button>
+                      );
+                    })}
+                  </div>
+
+                  {/* 検索 */}
+                  {gmSessions.length > 0 && (
+                    <input placeholder="🔍 セッション名・シナリオ名・PL・PCで検索…"
+                      value={gmSearch} onChange={e => setGmSearch(e.target.value)}
+                      style={{ ...inputStyle, width: "100%", marginBottom: 12, boxSizing: "border-box" }} />
+                  )}
+
+                  {gmSessions.length === 0 && (
+                    <div style={{ fontFamily: serif, fontSize: 14, color: T.dim, textAlign: "center", padding: "48px 0", fontStyle: "italic" }}>GMシートはありません</div>
+                  )}
+                  {gmFiltered.length === 0 && gmSessions.length > 0 && (
+                    <div style={{ fontFamily: serif, fontSize: 13, color: T.dim, textAlign: "center", padding: "32px 0" }}>条件に一致するセッションはありません</div>
+                  )}
+
+                  {gmFiltered.map(s => {
+                    const statusColor = GM_STATUS_COLORS[s.status || "GM予定"];
+                    return (
+                      <div key={s.id} onClick={() => { setGmViewId(s.id); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                        style={{ background: T.cardBg, border: `1px solid ${T.line}`, borderLeft: `4px solid ${statusColor}`, borderRadius: 4, padding: "14px 16px", marginBottom: 10, cursor: "pointer" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 6 }}>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                            <span style={{ fontFamily: mono, fontSize: 10, border: `1px solid ${statusColor}`, color: statusColor, borderRadius: 3, padding: "1px 7px" }}>{s.status || "GM予定"}</span>
+                            <div style={{ fontFamily: serif, fontSize: 16, fontWeight: "bold", color: T.text }}>{s.title || "無題のセッション"}</div>
+                          </div>
+                          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                            {s.date && <span style={{ fontFamily: mono, fontSize: 10, color: T.gold, border: `1px solid ${T.gold}`, borderRadius: 3, padding: "1px 7px" }}>{s.date}</span>}
+                            {s.discordUrl && <a href={s.discordUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ fontFamily: mono, fontSize: 10, color: "#5865F2", border: "1px solid #5865F2", borderRadius: 3, padding: "1px 7px", textDecoration: "none" }}>Discord</a>}
+                            {s.cocofoliaUrl && <a href={s.cocofoliaUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ fontFamily: mono, fontSize: 10, color: T.green, border: `1px solid ${T.green}`, borderRadius: 3, padding: "1px 7px", textDecoration: "none" }}>ここふぉりあ</a>}
+                          </div>
+                        </div>
+                        {s.scenarioTitle && <div style={{ fontFamily: serif, fontSize: 13, color: T.dim, marginTop: 6 }}>📖 {s.scenarioTitle}</div>}
+                        {s.players && s.players.length > 0 && (
+                          <div style={{ marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                            <span style={{ fontFamily: mono, fontSize: 11, color: T.dim }}>
+                              👥 {s.players.map(p => p.plName || "?").join(" / ")}
+                            </span>
+                            {s.players.some(p => p.charName) && (
+                              <span style={{ fontFamily: serif, fontSize: 11, color: T.dim }}>
+                                🎭 {s.players.filter(p => p.charName).map(p => p.charName).join(" / ")}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </>
+              );
+            })()}
 
             {/* ── 閲覧 ── */}
             {!gmDraft && gmViewId && (() => {
@@ -2929,8 +3185,9 @@ function App() {
                   </div>
 
                   <div style={{ marginBottom: 18 }}>
-                    <div style={{ fontFamily: serif, fontSize: 24, fontWeight: "bold", color: T.text, marginBottom: 6 }}>{s.title || "無題のセッション"}</div>
+                    <div style={{ fontFamily: serif, fontSize: 24, fontWeight: "bold", color: T.text, marginBottom: 8 }}>{s.title || "無題のセッション"}</div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      {(() => { const sc = GM_STATUS_COLORS[s.status || "GM予定"]; return <span style={{ fontFamily: mono, fontSize: 11, color: sc, border: `1px solid ${sc}`, borderRadius: 3, padding: "2px 10px" }}>{s.status || "GM予定"}</span>; })()}
                       {s.date && <span style={{ fontFamily: mono, fontSize: 11, color: T.gold, border: `1px solid ${T.gold}`, borderRadius: 3, padding: "2px 10px" }}>📅 {s.date}</span>}
                       {s.discordUrl && <a href={s.discordUrl} target="_blank" rel="noreferrer" style={{ fontFamily: mono, fontSize: 11, color: "#5865F2", border: "1px solid #5865F2", borderRadius: 3, padding: "2px 10px", textDecoration: "none" }}>Discord ↗</a>}
                       {s.cocofoliaUrl && <a href={s.cocofoliaUrl} target="_blank" rel="noreferrer" style={{ fontFamily: mono, fontSize: 11, color: T.green, border: `1px solid ${T.green}`, borderRadius: 3, padding: "2px 10px", textDecoration: "none" }}>ここふぉりあ ↗</a>}
@@ -2995,6 +3252,25 @@ function App() {
 
                 <Section title="基本情報">
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div>
+                      <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, marginBottom: 4 }}>ステータス</div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        {GM_STATUSES.map(st => {
+                          const active = (gmDraft.status || "GM予定") === st;
+                          const color = GM_STATUS_COLORS[st];
+                          return (
+                            <button key={st} onClick={() => setGmDraft({ ...gmDraft, status: st })}
+                              style={{
+                                fontFamily: mono, fontSize: 12, letterSpacing: 1, cursor: "pointer",
+                                padding: "5px 16px", borderRadius: 2,
+                                border: `1px solid ${color}`,
+                                background: active ? color : "transparent",
+                                color: active ? "#fff" : color,
+                              }}>{st}</button>
+                          );
+                        })}
+                      </div>
+                    </div>
                     <div>
                       <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, marginBottom: 4 }}>セッション名</div>
                       <input value={gmDraft.title} onChange={e => setGmDraft({ ...gmDraft, title: e.target.value })} placeholder="セッション名" style={inputStyle} />
@@ -3208,6 +3484,237 @@ function App() {
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
                   <Btn onClick={() => setNetaDraft(null)} small>キャンセル</Btn>
                   <Btn color={T.green} border={T.green} onClick={saveNetaDraft}>保存する</Btn>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ===== イラストギャラリー ===== */}
+        {view === "illust" && (
+          <div>
+            {!illustDraft ? (
+              /* ── 一覧 ── */
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                  <div style={{ fontFamily: serif, fontSize: 22 }}>ギャラリー <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{illusts.length} 件</span></div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <button onClick={exportGalleryImages} title="画像データを別ブラウザで使うためにエクスポート" style={{ fontFamily: mono, fontSize: 11, color: T.dim, border: `1px solid ${T.line}`, borderRadius: 2, padding: "5px 10px", background: "none", cursor: "pointer" }}>↓ 画像保存</button>
+                    <label title="別ブラウザからエクスポートした画像データをインポート" style={{ display: "inline-flex", alignItems: "center", cursor: "pointer", fontFamily: mono, fontSize: 11, color: T.dim, border: `1px solid ${T.line}`, borderRadius: 2, padding: "5px 10px" }}>
+                      ↑ 画像読込
+                      <input type="file" accept=".json" style={{ display: "none" }} onChange={async e => { if (e.target.files[0]) { await importGalleryImages(e.target.files[0]); e.target.value = ""; } }} />
+                    </label>
+                    <Btn color={T.green} border={T.green} onClick={() => { setIllustDraft(blankIllust()); window.scrollTo({ top: 0, behavior: "smooth" }); }}>+ 追加</Btn>
+                  </div>
+                </div>
+
+                {illusts.length > 0 && (
+                  <input placeholder="🔍 タイトル・作者・探索者名で検索…"
+                    value={illustSearch} onChange={e => setIllustSearch(e.target.value)}
+                    style={{ ...inputStyle, width: "100%", marginBottom: 10, boxSizing: "border-box" }} />
+                )}
+
+                {/* 探索者フィルタータグ */}
+                {(() => {
+                  const usedIds = [...new Set(illusts.flatMap(il => il.characterIds || []))];
+                  const usedChars = usedIds.map(id => characters.find(c => c.id === id)).filter(Boolean);
+                  if (!usedChars.length) return null;
+                  return (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+                      <button onClick={() => setIllustCharFilter(null)}
+                        style={{ fontFamily: mono, fontSize: 10, cursor: "pointer", padding: "3px 10px", borderRadius: 10, border: `1px solid ${illustCharFilter === null ? T.green : T.line}`, background: illustCharFilter === null ? T.green : "transparent", color: illustCharFilter === null ? "#fff" : T.dim }}>すべて</button>
+                      {usedChars.map(c => (
+                        <button key={c.id} onClick={() => setIllustCharFilter(illustCharFilter === c.id ? null : c.id)}
+                          style={{ display: "flex", alignItems: "center", gap: 4, fontFamily: serif, fontSize: 11, cursor: "pointer", padding: "3px 10px 3px 6px", borderRadius: 10, border: `1px solid ${illustCharFilter === c.id ? T.green : T.line}`, background: illustCharFilter === c.id ? T.green : "transparent", color: illustCharFilter === c.id ? "#fff" : T.text }}>
+                          {c.iconUrl && <img src={c.iconUrl} alt="" onError={e => { e.target.style.display = "none"; }} style={{ width: 14, height: 14, objectFit: "cover", objectPosition: "top", borderRadius: 2 }} />}
+                          {c.name || "(名称未記入)"}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })()}
+
+                {illusts.length === 0 && (
+                  <div style={{ border: `1px dashed ${T.line}`, padding: 40, textAlign: "center", color: T.dim, fontFamily: serif, background: T.panel }}>
+                    まだイラストはありません。「+ 追加」から登録しましょう。
+                  </div>
+                )}
+
+                {(() => {
+                  const filtered = illusts.filter(il => {
+                    if (illustCharFilter && !(il.characterIds || []).includes(illustCharFilter)) return false;
+                    if (!illustSearch.trim()) return true;
+                    const q = illustSearch.trim().toLowerCase();
+                    const charNames = (il.characterIds || []).map(id => { const c = characters.find(c => c.id === id); return c ? (c.name || "") : ""; }).join(" ");
+                    return [il.title, il.artistName, il.memo, charNames].some(f => (f || "").toLowerCase().includes(q));
+                  });
+                  if (!filtered.length && illusts.length > 0)
+                    return <div style={{ fontFamily: serif, fontSize: 13, color: T.dim, textAlign: "center", padding: "32px 0" }}>条件に一致するイラストはありません</div>;
+                  return (
+                    <div key={galleryKey} style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(3, 1fr)", gap: 12 }}>
+                      {filtered.map(il => {
+                        const firstImg = (il.images || [])[0];
+                        const charTags = (il.characterIds || []).map(id => characters.find(c => c.id === id)).filter(Boolean);
+                        return (
+                          <div key={il.id} onClick={() => { setIllustDraft({ ...il, images: (il.images || []).map(m => ({ ...m })) }); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                            style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 4, overflow: "hidden", cursor: "pointer", display: "flex", flexDirection: "column" }}>
+                            {/* サムネイル（GalleryThumb が遅延ロード） */}
+                            <div style={{ position: "relative", paddingTop: "100%", flexShrink: 0 }}>
+                              <GalleryThumb imgId={firstImg?.id} thumbX={firstImg?.thumbX ?? 50} thumbY={firstImg?.thumbY ?? 30} count={(il.images || []).length} />
+                              {/* ダウンロードボタン */}
+                              {firstImg && (
+                                <button onClick={e => {
+                                    e.stopPropagation();
+                                    const src = _imgCache.get(firstImg.id);
+                                    if (src) downloadDataUrl(src, (il.title || "illust") + ".jpg");
+                                  }}
+                                  title="画像を保存" style={{ position: "absolute", top: 5, right: 5, background: "rgba(0,0,0,0.5)", border: "none", color: "#fff", borderRadius: 3, width: 26, height: 26, cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>⬇</button>
+                              )}
+                            </div>
+                            {/* 情報 */}
+                            <div style={{ padding: "10px 10px 8px", flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
+                              {il.title && <div style={{ fontFamily: serif, fontSize: 13, fontWeight: "bold", color: T.text, lineHeight: 1.4 }}>{il.title}</div>}
+                              {charTags.length > 0 && (
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                                  {charTags.map(c => (
+                                    <span key={c.id} style={{ display: "inline-flex", alignItems: "center", gap: 3, fontFamily: serif, fontSize: 10, color: T.green, border: `1px solid ${T.green}`, borderRadius: 8, padding: "1px 6px 1px 4px" }}>
+                                      {c.iconUrl && <img src={c.iconUrl} alt="" onError={e => { e.target.style.display = "none"; }} style={{ width: 12, height: 12, objectFit: "cover", objectPosition: "top", borderRadius: 2 }} />}
+                                      {c.name || "(名称未記入)"}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {il.artistName && (
+                                <div style={{ marginTop: "auto", paddingTop: 4 }}>
+                                  {il.artistSnsUrl
+                                    ? <a href={il.artistSnsUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ fontFamily: mono, fontSize: 10, color: T.dim, textDecoration: "none" }}>✎ {il.artistName} ↗</a>
+                                    : <span style={{ fontFamily: mono, fontSize: 10, color: T.dim }}>✎ {il.artistName}</span>}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </>
+            ) : (
+              /* ── 編集 ── */
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 8 }}>
+                  <Btn onClick={() => setIllustDraft(null)} small>← 一覧に戻る</Btn>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {illusts.some(il => il.id === illustDraft.id) && (
+                      <Btn small color={T.red} border={T.red} onClick={() => {
+                        if (!window.confirm("削除しますか？")) return;
+                        (illustDraft.images || []).forEach(img => imageDB.del(img.id).catch(() => {}));
+                        persistIllusts(illusts.filter(il => il.id !== illustDraft.id));
+                        setIllustDraft(null);
+                      }}>削除</Btn>
+                    )}
+                    <Btn color={T.green} border={T.green} onClick={saveIllustDraft}>保存する</Btn>
+                  </div>
+                </div>
+
+                {/* 画像セクション */}
+                <Section title="画像">
+                  {(illustDraft.images || []).map((img, i) => {
+                    const src = editImages[img.id];
+                    return (
+                      <div key={img.id} style={{ marginBottom: 14, background: T.bg, border: `1px solid ${T.line}`, borderRadius: 4, overflow: "hidden" }}>
+                        {/* 画像表示エリア — inline-block で画像に密着させてレターボックスを排除 */}
+                        <div style={{ background: T.panel, padding: "10px 8px 4px", display: "flex", flexDirection: "column", alignItems: "center", userSelect: "none" }}>
+                          {src ? (
+                            <div style={{ position: "relative", display: "inline-block", maxWidth: "100%", lineHeight: 0, cursor: "crosshair" }}
+                              onClick={e => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const x = Math.round((e.clientX - rect.left) / rect.width * 100);
+                                const y = Math.round((e.clientY - rect.top) / rect.height * 100);
+                                setIllustDraft(prev => ({ ...prev, images: prev.images.map((im, j) => j === i ? { ...im, thumbX: x, thumbY: y } : im) }));
+                              }}>
+                              <img src={src} alt={img.label || ""}
+                                style={{ display: "block", maxWidth: "100%", maxHeight: 340, width: "auto", height: "auto" }} />
+                              {/* 焦点マーカー — 画像座標に正確に対応 */}
+                              <div style={{ position: "absolute", left: `${img.thumbX ?? 50}%`, top: `${img.thumbY ?? 30}%`, transform: "translate(-50%,-50%)", width: 22, height: 22, borderRadius: "50%", border: "2.5px solid #fff", boxShadow: "0 0 0 1.5px rgba(0,0,0,0.7), 0 0 6px rgba(0,0,0,0.4)", pointerEvents: "none" }} />
+                            </div>
+                          ) : (
+                            <div style={{ height: 80, display: "flex", alignItems: "center", justifyContent: "center", color: T.dim, fontFamily: mono, fontSize: 13, width: "100%" }}>読み込み中…</div>
+                          )}
+                          <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, marginTop: 5, marginBottom: 2, alignSelf: "flex-start" }}>
+                            クリックして焦点を設定（サムネイルの中心になる点）
+                          </div>
+                        </div>
+                        {/* ラベル・操作行 */}
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 10px" }}>
+                          <input value={img.label || ""} onChange={e => setIllustDraft(prev => ({ ...prev, images: prev.images.map((im, j) => j === i ? { ...im, label: e.target.value } : im) }))}
+                            placeholder="ラベル（任意）" style={{ ...inputStyle, flex: 1, fontSize: 13 }} />
+                          {src && <ThumbPreview src={src} thumbX={img.thumbX ?? 50} thumbY={img.thumbY ?? 30} />}
+                          {src && (
+                            <button onClick={() => downloadDataUrl(src, (illustDraft.title || img.label || "illust") + "_" + (i + 1) + ".jpg")}
+                              title="保存" style={{ background: "none", border: `1px solid ${T.line}`, color: T.dim, cursor: "pointer", borderRadius: 2, padding: "2px 7px", fontFamily: mono, fontSize: 13, flexShrink: 0 }}>⬇</button>
+                          )}
+                          <button onClick={() => { imageDB.del(img.id).catch(() => {}); setIllustDraft(prev => ({ ...prev, images: prev.images.filter((_, j) => j !== i) })); }}
+                            style={{ background: "none", border: "none", color: T.red, cursor: "pointer", fontFamily: mono, fontSize: 18, flexShrink: 0, lineHeight: 1 }}>×</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", fontFamily: mono, fontSize: 12, color: T.green, border: `1px solid ${T.green}`, borderRadius: 2, padding: "6px 14px" }}>
+                      + 画像を追加
+                      <input type="file" accept="image/*" multiple style={{ display: "none" }}
+                        onChange={async e => {
+                          const files = [...e.target.files]; e.target.value = "";
+                          for (const file of files) {
+                            const meta = blankIllustImage();
+                            const dataUrl = await compressImage(file);
+                            _imgCache.set(meta.id, dataUrl);
+                            await imageDB.set(meta.id, dataUrl);
+                            setEditImages(prev => ({ ...prev, [meta.id]: dataUrl }));
+                            setIllustDraft(prev => ({ ...prev, images: [...prev.images, meta] }));
+                          }
+                        }} />
+                    </label>
+                    <span style={{ fontFamily: serif, fontSize: 12, color: T.dim }}>PNG・JPG・WebP 対応 / 複数選択可</span>
+                  </div>
+                </Section>
+
+                <Section title="タイトル（任意）">
+                  <input value={illustDraft.title} onChange={e => setIllustDraft({ ...illustDraft, title: e.target.value })}
+                    placeholder="タイトルや説明…" style={inputStyle} />
+                </Section>
+
+                <Section title="探索者タグ">
+                  <CharTagPicker characters={characters} value={illustDraft.characterIds}
+                    onChange={ids => setIllustDraft({ ...illustDraft, characterIds: ids })} />
+                </Section>
+
+                <Section title="作者情報">
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div>
+                      <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, marginBottom: 4 }}>作者名 / ハンドルネーム</div>
+                      <input value={illustDraft.artistName} onChange={e => setIllustDraft({ ...illustDraft, artistName: e.target.value })}
+                        placeholder="作者名…" style={inputStyle} />
+                    </div>
+                    <div>
+                      <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, marginBottom: 4 }}>SNS / プロフィールURL</div>
+                      <input value={illustDraft.artistSnsUrl} onChange={e => setIllustDraft({ ...illustDraft, artistSnsUrl: e.target.value })}
+                        placeholder="https://x.com/..." style={{ ...inputStyle, fontFamily: mono, fontSize: 13 }} />
+                    </div>
+                  </div>
+                </Section>
+
+                <Section title="メモ（任意）">
+                  <textarea value={illustDraft.memo} rows={3}
+                    onChange={e => setIllustDraft({ ...illustDraft, memo: e.target.value })}
+                    placeholder="受け取った日、依頼内容、感想など…"
+                    style={{ ...inputStyle, resize: "vertical", lineHeight: 1.7 }} />
+                </Section>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+                  <Btn onClick={() => { setIllustDraft(null); }} small>キャンセル</Btn>
+                  <Btn color={T.green} border={T.green} onClick={saveIllustDraft}>保存する</Btn>
                 </div>
               </>
             )}
