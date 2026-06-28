@@ -473,7 +473,7 @@ const GM_STATUSES = ["GM予定", "GM済み"];
 const GM_STATUS_COLORS = { "GM予定": "#3A6EA5", "GM済み": "#8A6A1C" };
 const blankGmSession = () => ({
   id: "gm" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-  title: "", date: "", status: "GM予定", scenarioTitle: "", scenarioUrl: "",
+  title: "", date: "", status: "GM予定", scenarioId: "", scenarioTitle: "", scenarioUrl: "",
   discordUrl: "", cocofoliaUrl: "", memo: "", players: [],
   createdAt: new Date().toISOString(),
 });
@@ -501,7 +501,7 @@ const netaStore = {
 };
 const blankNeta = () => ({
   id: "neta" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-  title: "", characterIds: [], memo: "", links: [],
+  title: "", characterIds: [], tags: [], memo: "", links: [],
   createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
 });
 const blankNetaLink = () => ({ id: "nl" + Date.now().toString(36), url: "", label: "" });
@@ -601,7 +601,7 @@ const SCENARIO_STATUS_COLORS = {
 const blankScenario = () => ({
   id: "sc" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
   title: "", author: "", edition: "", status: "積み",
-  url: "", memo: "", updatedAt: Date.now(),
+  url: "", tags: [], memo: "", updatedAt: Date.now(),
 });
 
 const blankMemo = () => ({
@@ -647,7 +647,7 @@ function parseYouTube(url) {
 
 const blankJournalEntry = () => ({
   id: "j" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-  date: "", scenario: "", characterId: "",
+  date: "", scenario: "", scenarioId: "", characterId: "",
   party: "", ending: "", aftermath: "", memo: "",
   updatedAt: Date.now(),
 });
@@ -1082,6 +1082,64 @@ function GalleryThumb({ imgId, thumbX = 50, thumbY = 30, count }) {
   );
 }
 
+/* ポスト集の探索者タグ検索追加 */
+function CharTagAdder({ characters, currentTags, onAdd }) {
+  const [q, setQ] = React.useState("");
+  const [open, setOpen] = React.useState(false);
+  const ql = q.trim().toLowerCase();
+  const matches = characters.filter((c) =>
+    !currentTags.includes(c.name || "") &&
+    (ql === "" || [c.name, c.occupation].some((t) => String(t || "").toLowerCase().includes(ql)))
+  );
+  const row = { display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", cursor: "pointer", borderBottom: `1px solid ${T.line}` };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span style={{ fontFamily: mono, fontSize: 11, color: T.dim, flexShrink: 0 }}>探索者タグを追加:</span>
+      <div style={{ position: "relative", flex: 1, maxWidth: 260 }}>
+        <input
+          value={q}
+          placeholder="名前で検索…"
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+          style={{ ...inputStyle, fontSize: 13, width: "100%", boxSizing: "border-box" }} />
+        {open && (
+          <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 60, background: T.panel2, border: `1px solid ${T.line}`, maxHeight: 200, overflowY: "auto", boxShadow: "0 4px 14px rgba(46,42,35,0.2)" }}>
+            {matches.length === 0 ? (
+              <div style={{ padding: "8px 10px", fontFamily: serif, fontSize: 12, color: T.dim }}>{ql ? "該当なし" : "探索者が登録されていません"}</div>
+            ) : matches.map((c) => (
+              <div key={c.id} onMouseDown={() => { onAdd(c.name || "(名称未記入)"); setQ(""); setOpen(false); }} style={row}>
+                {c.iconUrl && (
+                  <img src={c.iconUrl} alt="" onError={(e) => { e.target.style.display = "none"; }}
+                    style={{ width: 22, height: 22, objectFit: "cover", objectPosition: "center top", borderRadius: 2, flexShrink: 0 }} />
+                )}
+                <span style={{ fontFamily: serif, fontSize: 13, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name || "(名称未記入)"}</span>
+                <span style={{ fontFamily: mono, fontSize: 10, color: T.dim }}>{c.occupation || ""}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* シナリオ管理と連携するピッカー */
+function ScenarioPicker({ scenarios, value, onChange, style }) {
+  if (!scenarios || !scenarios.length) return (
+    <div style={{ fontFamily: serif, fontSize: 12, color: T.dim, padding: "6px 0" }}>（シナリオ管理に登録がありません）</div>
+  );
+  return (
+    <select value={value || ""} onChange={e => onChange(e.target.value)}
+      style={{ ...(style || {}), fontFamily: serif, background: T.bg, color: T.text, border: `1px solid ${T.line}`, borderRadius: 4, padding: "7px 8px", fontSize: 13, width: "100%" }}>
+      <option value="">連携しない</option>
+      {scenarios.map(sc => (
+        <option key={sc.id} value={sc.id}>{sc.title}{sc.author ? ` — ${sc.author}` : ""}</option>
+      ))}
+    </select>
+  );
+}
+
 /* 編集フォーム内のサムネイルプレビュー */
 function ThumbPreview({ src, thumbX = 50, thumbY = 30, size = 52 }) {
   const imgRef = React.useRef(null);
@@ -1130,7 +1188,7 @@ function App() {
   const [events, setEvents] = useState(() => eventStore.load());
   const [calYM, setCalYM] = useState(() => { const n = new Date(); return { y: n.getFullYear(), m: n.getMonth() + 1 }; });
   const [eventFocusId, setEventFocusId] = useState(null);
-  const [newEvent, setNewEvent] = useState({ date: "", endDate: "", time: "", title: "", cat: "配信", repeat: "none", url: "", role: "PL", characterId: "", campaign: "", discord: "" });
+  const [newEvent, setNewEvent] = useState({ date: "", endDate: "", time: "", title: "", cat: "配信", repeat: "none", url: "", role: "PL", characterId: "", campaign: "", discord: "", scenarioId: "" });
   const [popupOpen, setPopupOpen] = useState(true);
   const persistEvents = (list) => { setEvents(list); eventStore.save(list); };
 
@@ -1138,6 +1196,7 @@ function App() {
   const [journal, setJournal] = useState(() => journalStore.load());
   const [jDraft, setJDraft] = useState(null); // nullなら入力フォーム非表示
   const [journalFocusId, setJournalFocusId] = useState(null);
+  const [charViewId, setCharViewId] = useState(null);
   const [journalSearch, setJournalSearch] = useState("");
   const persistJournal = (list) => { setJournal(list); journalStore.save(list); };
 
@@ -1162,7 +1221,17 @@ function App() {
   const [scenarios, setScenarios] = useState(() => scenarioStore.load());
   const [scDraft, setScDraft] = useState(null);
   const [scFilter, setScFilter] = useState("");
+  const [scViewId, setScViewId] = useState(null);
+  const [scSearch, setScSearch] = useState("");
   const persistScenarios = (list) => { setScenarios(list); scenarioStore.save(list); };
+  const saveScenarioDraft = () => {
+    if (!scDraft || !scDraft.title.trim()) return;
+    const sc = { ...scDraft, updatedAt: Date.now() };
+    const isNew = !scenarios.some(x => x.id === sc.id);
+    persistScenarios(isNew ? [sc, ...scenarios] : scenarios.map(x => x.id === sc.id ? sc : x));
+    if (isNew) setScViewId(sc.id);
+    setScDraft(null);
+  };
 
   /* TODO リスト */
   const [todos, setTodos] = useState(() => todoStore.load());
@@ -1379,6 +1448,13 @@ function App() {
     setDraft(normalizeCharacter(JSON.parse(JSON.stringify(c))));
     setIoOpen(false); setIoText(""); setIoMsg("");
     setView("edit");
+  };
+
+  const openView = (c) => {
+    if (!c) return;
+    setCharViewId(c.id);
+    setView("char");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const saveDraft = () => {
@@ -1695,7 +1771,7 @@ function App() {
                   )}
                   <span style={{ flex: 1 }}>{ev.time && `${ev.time} `}{ev.title}</span>
                   {ev.cat === "TRPG" && ev.characterId && charById(ev.characterId) && (
-                    <span onClick={() => { setPopupOpen(false); openEdit(charById(ev.characterId)); }}
+                    <span onClick={() => { setPopupOpen(false); openView(charById(ev.characterId)); }}
                       style={{ fontFamily: serif, fontSize: 12, color: T.green, cursor: "pointer", textDecoration: "underline", whiteSpace: "nowrap" }}>
                       シートへ
                     </span>
@@ -1751,7 +1827,7 @@ function App() {
                   <div style={{ display: "grid", gap: 8 }}>
                     {todayBirthdays.map((c) => (
                       <div key={c.id} style={{ display: "flex", gap: 10, alignItems: "center", cursor: "pointer" }}
-                        onClick={() => openEdit(c)}>
+                        onClick={() => openView(c)}>
                         <span style={{ fontFamily: serif, fontSize: 14, color: T.red }}>🎂 {c.name || "(名称未記入)"} の誕生日</span>
                         <a href={googleCalendarUrl(c)} target="_blank" rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}
@@ -1772,6 +1848,37 @@ function App() {
                   </div>
                 </Section>
               )}
+
+              {(characters.length > 0 || scenarios.length > 0) && (() => {
+                const daySeed = todayD.getFullYear() * 10000 + (todayD.getMonth() + 1) * 100 + todayD.getDate();
+                const todayChar = characters.length > 0 ? characters[daySeed % characters.length] : null;
+                const todayScenario = scenarios.length > 0 ? scenarios[(daySeed * 7 + 3) % scenarios.length] : null;
+                return (
+                  <Section title="DAILY — 今日のピックアップ">
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {todayChar && (
+                        <div onClick={() => openView(todayChar)} style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
+                          <span style={{ fontFamily: mono, fontSize: 10, color: T.dim, flexShrink: 0, minWidth: 46 }}>探索者</span>
+                          <span style={{ fontFamily: serif, fontSize: 14, color: todayChar.color || T.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{todayChar.name || "(名称未記入)"}</span>
+                          {(todayChar.occupation || todayChar.age) && (
+                            <span style={{ fontFamily: serif, fontSize: 12, color: T.dim, flexShrink: 0 }}>{todayChar.occupation || ""}{todayChar.age ? ` ・ ${todayChar.age}歳` : ""}</span>
+                          )}
+                        </div>
+                      )}
+                      {todayScenario && (
+                        <div onClick={() => { setScViewId(todayScenario.id); setView("scenario"); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                          style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
+                          <span style={{ fontFamily: mono, fontSize: 10, color: T.dim, flexShrink: 0, minWidth: 46 }}>シナリオ</span>
+                          <span style={{ fontFamily: serif, fontSize: 14, color: T.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{todayScenario.title || "(タイトル未記入)"}</span>
+                          {todayScenario.status && (
+                            <span style={{ fontFamily: mono, fontSize: 10, color: SCENARIO_STATUS_COLORS[todayScenario.status] || T.dim, border: `1px solid ${SCENARIO_STATUS_COLORS[todayScenario.status] || T.dim}`, borderRadius: 8, padding: "1px 6px", flexShrink: 0 }}>{todayScenario.status}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </Section>
+                );
+              })()}
 
               <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 16 }}>
                 <Section title="UPCOMING — 今後7日間">
@@ -1940,7 +2047,7 @@ function App() {
                       <Btn small onClick={spinPick}>🎲 もう一度</Btn>
                       {!picking && (
                         <Btn small color={T.green} border={T.green}
-                          onClick={() => { const ch = c; setPickedId(null); openEdit(ch); }}>
+                          onClick={() => { const ch = c; setPickedId(null); openView(ch); }}>
                           シートを開く
                         </Btn>
                       )}
@@ -1975,7 +2082,7 @@ function App() {
                 const dv = RULESETS[c.edition].derive(c.abilities);
                 const pick = (k) => dv.find((x) => x.key === k)?.value;
                 return (
-                  <div key={c.id} onClick={() => openEdit(c)}
+                  <div key={c.id} onClick={() => { setCharViewId(c.id); setView("char"); }}
                     style={{
                       background: T.panel, border: `1px solid ${T.line}`,
                       borderTop: `3px solid ${c.color || T.gold}`,
@@ -2009,6 +2116,179 @@ function App() {
             </div>
           </div>
         )}
+
+        {/* ===== 探索者閲覧 ===== */}
+        {view === "char" && (() => {
+          const c = characters.find(x => x.id === charViewId);
+          if (!c) return <div style={{ fontFamily: serif, color: T.dim, padding: 40 }}>探索者が見つかりません</div>;
+          const rs = RULESETS[c.edition] || RULESETS["6e"];
+          const dv = rs.derive(c.abilities);
+          const pick = (k) => dv.find(x => x.key === k)?.value;
+          const customSkills = Object.entries(c.skills || {}).filter(([name, val]) => {
+            const def = rs.skillCategories.flatMap(cat => cat.skills).find(s => normName(s.n) === name);
+            return def ? Number(val) !== skillInit(def, c.abilities) : true;
+          });
+          const charJournal = [...(journal || [])].filter(j => j.characterId === c.id)
+            .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+          const charSessions = [...(c.sessions || [])].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+          const prof = c.profile || {};
+          const profRows = [
+            ["身長・体重", [prof.height, prof.weight].filter(Boolean).join(" ／ ")],
+            ["髪・瞳", [prof.hair, prof.eyes].filter(Boolean).join(" ／ ")],
+            ["一人称・口調", [prof.firstPerson, prof.speech].filter(Boolean).join(" ／ ")],
+            ["性格", prof.personality],
+            ["好きなもの", prof.likes],
+            ["嫌いなもの", prof.dislikes],
+            ["信念・目標", prof.belief],
+            ["交友関係", prof.relations],
+          ].filter(([, v]) => v);
+          return (
+            <div>
+              {/* ナビ */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 8 }}>
+                <Btn onClick={() => setView("list")} small>← 名簿に戻る</Btn>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Btn small color={T.gold} border={T.gold} onClick={() => { setJDraft({ ...blankJournalEntry(), characterId: c.id }); setView("journal"); }}>📔 日誌を書く</Btn>
+                  <Btn color={T.green} border={T.green} onClick={() => openEdit(c)}>✎ 編集する</Btn>
+                </div>
+              </div>
+
+              {/* ヘッダー */}
+              <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderTop: `4px solid ${c.color || T.gold}`, borderRadius: 2, padding: "20px 22px", marginBottom: 16, display: "flex", gap: 18, alignItems: "flex-start" }}>
+                {c.iconUrl && (
+                  <img src={c.iconUrl} alt="" onError={e => { e.target.style.display = "none"; }}
+                    style={{ width: 88, height: 88, objectFit: "cover", objectPosition: "center top", borderRadius: 2, border: `2px solid ${c.color || T.line}`, flexShrink: 0 }} />
+                )}
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, letterSpacing: 1 }}>FILE No. {c.id.slice(-6).toUpperCase()} ／ {rs.label}</div>
+                  <div style={{ fontFamily: serif, fontSize: 28, margin: "4px 0 2px", color: c.color || T.paper, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name || "(名称未記入)"}</div>
+                  <div style={{ fontFamily: serif, fontSize: 14, color: T.dim }}>
+                    {[c.occupation, c.age ? `${c.age}歳` : null, c.gender, c.origin].filter(Boolean).join(" ・ ")}
+                  </div>
+                  {c.externalUrl && (
+                    <a href={c.externalUrl} target="_blank" rel="noreferrer"
+                      style={{ fontFamily: mono, fontSize: 11, color: T.green, textDecoration: "none", display: "inline-block", marginTop: 6 }}>
+                      キャラシを開く ↗
+                    </a>
+                  )}
+                </div>
+                <div style={{ fontFamily: mono, fontSize: 13, display: "flex", flexDirection: "column", gap: 4, textAlign: "right", flexShrink: 0 }}>
+                  <span>HP <b style={{ fontSize: 16 }}>{c.current?.HP ?? pick("HP")}</b><span style={{ color: T.dim, fontSize: 11 }}> /{pick("HP")}</span></span>
+                  <span>MP <b style={{ fontSize: 16 }}>{c.current?.MP ?? pick("MP")}</b><span style={{ color: T.dim, fontSize: 11 }}> /{pick("MP")}</span></span>
+                  <span style={{ color: T.red }}>SAN <b style={{ fontSize: 16 }}>{c.current?.SAN ?? pick("SAN")}</b><span style={{ color: T.dim, fontSize: 11 }}> /{pick("SAN")}</span></span>
+                </div>
+              </div>
+
+              {/* 能力値 */}
+              <Section title="能力値 CHARACTERISTICS">
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 20px", fontFamily: mono, fontSize: 13 }}>
+                  {rs.abilities.map(a => (
+                    <span key={a.key} style={{ color: T.dim }}>
+                      <span style={{ fontSize: 10, letterSpacing: 1 }}>{a.key} </span>
+                      <b style={{ color: T.paper, fontSize: 16 }}>{c.abilities?.[a.key] ?? "—"}</b>
+                    </span>
+                  ))}
+                  {dv.filter(d => !["HP","MP","SAN"].includes(d.key)).map(d => (
+                    <span key={d.key} style={{ color: T.dim }}>
+                      <span style={{ fontSize: 10, letterSpacing: 1 }}>{d.name} </span>
+                      <b style={{ color: T.paper, fontSize: 16 }}>{d.value}</b>
+                    </span>
+                  ))}
+                </div>
+              </Section>
+
+              {/* カスタム技能 */}
+              {customSkills.length > 0 && (
+                <Section title="技能 SKILLS(初期値から変更したもの)">
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: "0 24px" }}>
+                    {customSkills.map(([name, val]) => (
+                      <div key={name} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px dashed ${T.line}` }}>
+                        <span style={{ fontFamily: serif, fontSize: 13, color: T.paper, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 6 }}>{name}</span>
+                        <b style={{ fontFamily: mono, fontSize: 14, color: T.gold, flexShrink: 0 }}>{val}</b>
+                      </div>
+                    ))}
+                  </div>
+                </Section>
+              )}
+
+              {/* プロフィール */}
+              {(profRows.length > 0 || c.backstory || c.items || c.memo) && (
+                <Section title="プロフィール PERSONAL FILE">
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {profRows.map(([label, val]) => (
+                      <div key={label} style={{ display: "grid", gridTemplateColumns: "6em 1fr", gap: 8, alignItems: "baseline" }}>
+                        <span style={{ fontFamily: mono, fontSize: 10, color: T.dim, letterSpacing: 1 }}>{label}</span>
+                        <span style={{ fontFamily: serif, fontSize: 14, whiteSpace: "pre-wrap", lineHeight: 1.7 }}>{val}</span>
+                      </div>
+                    ))}
+                    {c.backstory && (
+                      <div>
+                        <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, letterSpacing: 1, marginBottom: 4 }}>来歴・バックストーリー</div>
+                        <div style={{ fontFamily: serif, fontSize: 14, whiteSpace: "pre-wrap", lineHeight: 1.8, borderLeft: `2px solid ${T.line}`, paddingLeft: 12 }}>{c.backstory}</div>
+                      </div>
+                    )}
+                    {c.items && (
+                      <div>
+                        <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, letterSpacing: 1, marginBottom: 4 }}>所持品・財産</div>
+                        <div style={{ fontFamily: serif, fontSize: 14, whiteSpace: "pre-wrap", lineHeight: 1.7 }}>{c.items}</div>
+                      </div>
+                    )}
+                    {c.memo && (
+                      <div>
+                        <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, letterSpacing: 1, marginBottom: 4 }}>メモ</div>
+                        <div style={{ fontFamily: serif, fontSize: 14, whiteSpace: "pre-wrap", lineHeight: 1.7 }}>{c.memo}</div>
+                      </div>
+                    )}
+                  </div>
+                </Section>
+              )}
+
+              {/* 関係者 */}
+              {c.contacts?.length > 0 && (
+                <Section title="関係者 CONTACTS">
+                  <div style={{ display: "grid", gap: 6 }}>
+                    {c.contacts.map(p => (
+                      <div key={p.id} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", borderBottom: `1px dashed ${T.line}`, paddingBottom: 6 }}>
+                        <span style={{ fontFamily: serif, fontSize: 15, flexShrink: 0 }}>{p.name}</span>
+                        <span style={{ fontFamily: serif, fontSize: 13, color: T.dim, flex: 1 }}>{p.note}</span>
+                        {p.url && <a href={p.url} target="_blank" rel="noreferrer" style={{ fontFamily: mono, fontSize: 11, color: T.green, textDecoration: "none" }}>キャラシ ↗</a>}
+                      </div>
+                    ))}
+                  </div>
+                </Section>
+              )}
+
+              {/* セッション記録 */}
+              {(charJournal.length > 0 || charSessions.length > 0) && (
+                <Section title="セッション記録 SESSION LOG">
+                  <div style={{ display: "grid", gap: 4 }}>
+                    {charJournal.map(j => (
+                      <div key={j.id} onClick={() => { setJournalFocusId(j.id); setView("journal"); }}
+                        style={{ display: "flex", gap: 14, alignItems: "baseline", borderBottom: `1px dashed ${T.line}`, padding: "5px 0", cursor: "pointer" }}>
+                        <span style={{ fontFamily: mono, fontSize: 12, color: T.dim, minWidth: 96, flexShrink: 0 }}>{j.date || "日付不明"}</span>
+                        <span style={{ fontFamily: serif, fontSize: 14, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.scenario}</span>
+                        {j.ending && <span style={{ fontFamily: serif, fontSize: 12, color: T.dim, flexShrink: 0 }}>{j.ending.length > 20 ? j.ending.slice(0, 20) + "…" : j.ending}</span>}
+                        <span style={{ fontFamily: mono, fontSize: 11, color: T.green, flexShrink: 0 }}>📔 日誌</span>
+                      </div>
+                    ))}
+                    {charSessions.filter(s => !charJournal.some(j => j.date === s.date && j.scenario === s.scenario)).map(s => (
+                      <div key={s.id} style={{ display: "flex", gap: 14, alignItems: "baseline", borderBottom: `1px dashed ${T.line}`, padding: "5px 0" }}>
+                        <span style={{ fontFamily: mono, fontSize: 12, color: T.dim, minWidth: 96, flexShrink: 0 }}>{s.date || "日付不明"}</span>
+                        <span style={{ fontFamily: serif, fontSize: 14 }}>{s.scenario}</span>
+                      </div>
+                    ))}
+                  </div>
+                </Section>
+              )}
+
+              <div style={{ marginTop: 18, textAlign: "right" }}>
+                <Btn small color={T.red} border={T.red} onClick={() => { if (confirm("このファイルを破棄します。よろしいですか?")) { persist(characters.filter(x => x.id !== c.id)); setView("list"); } }}>
+                  このファイルを破棄する
+                </Btn>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ===== カレンダー(誕生日+予定) ===== */}
         {view === "calendar" && (() => {
@@ -2076,7 +2356,7 @@ function App() {
                       ) : (
                         <React.Fragment>
                           {bds.map((c) => (
-                            <div key={c.id} onClick={() => openEdit(c)} title={`${c.name || ""} の誕生日`}
+                            <div key={c.id} onClick={() => openView(c)} title={`${c.name || ""} の誕生日`}
                               style={{ fontFamily: serif, fontSize: 11, color: T.red, cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               🎂{c.name || "?"}
                             </div>
@@ -2171,6 +2451,16 @@ function App() {
                       <CharPicker characters={characters} value={newEvent.characterId}
                         onChange={(id) => setNewEvent({ ...newEvent, characterId: id })}
                         width={185} noneLabel="(未選択)" />
+                    </div>
+                  )}
+                  {newEvent.cat === "TRPG" && (
+                    <div>
+                      <Label>シナリオ管理と連携（任意）</Label>
+                      <ScenarioPicker scenarios={scenarios} value={newEvent.scenarioId || ""}
+                        onChange={id => {
+                          const sc = scenarios.find(x => x.id === id);
+                          setNewEvent({ ...newEvent, scenarioId: id, title: sc && !newEvent.title.trim() ? sc.title : newEvent.title });
+                        }} />
                     </div>
                   )}
                   <Btn small color={T.green} border={T.green} onClick={() => {
@@ -2268,7 +2558,7 @@ function App() {
                             <span style={{ fontFamily: serif, fontSize: 14, flex: 1, minWidth: 80 }}>{ev.title}{past && <span style={{ fontFamily: mono, fontSize: 10, color: T.dim }}> (終了)</span>}</span>
                           )}
                           {!isMobile && ch && (
-                            <span onClick={() => openEdit(ch)}
+                            <span onClick={() => openView(ch)}
                               style={{ fontFamily: serif, fontSize: 12, color: T.green, cursor: "pointer", textDecoration: "underline", whiteSpace: "nowrap" }}>
                               {ch.name || "(名称未記入)"}{ev.role === "GM" ? "(KPC)" : ""} のシートへ
                             </span>
@@ -2282,14 +2572,23 @@ function App() {
                         )}
                         {/* スマホ: 探索者リンクを次の行に */}
                         {isMobile && ch && (
-                          <div onClick={() => openEdit(ch)}
+                          <div onClick={() => openView(ch)}
                             style={{ fontFamily: serif, fontSize: 12, color: T.green, cursor: "pointer", textDecoration: "underline", marginTop: 2 }}>
                             {ch.name || "(名称未記入)"}{ev.role === "GM" ? "(KPC)" : ""} のシートへ
                           </div>
                         )}
                         {/* シナリオ名の下: リンク類 */}
-                        {(ev.discord || ev.url) && (
+                        {(ev.discord || ev.url || (ev.cat === "TRPG" && ev.scenarioId)) && (
                           <div style={{ marginTop: 3, display: "flex", gap: 14, alignItems: "baseline", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                            {ev.cat === "TRPG" && ev.scenarioId && (() => {
+                              const sc = scenarios.find(x => x.id === ev.scenarioId);
+                              return sc ? (
+                                <button onClick={() => { setScViewId(sc.id); setView("scenario"); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                                  style={{ fontFamily: mono, fontSize: 11, color: T.gold, background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "none" }}>
+                                  📚 シナリオ管理で見る →
+                                </button>
+                              ) : null;
+                            })()}
                             {ev.discord && (
                               <a href={ev.discord} target="_blank" rel="noreferrer"
                                 style={{ fontFamily: mono, fontSize: 11, color: "#5865F2", textDecoration: "none" }}>💬 Discord ↗</a>
@@ -2389,6 +2688,14 @@ function App() {
                         width="100%" noneLabel="(なし / GM等)" />
                     </div>
                   </div>
+                  <div>
+                    <Label>シナリオ管理と連携（任意）</Label>
+                    <ScenarioPicker scenarios={scenarios} value={jDraft.scenarioId || ""}
+                      onChange={id => {
+                        const sc = scenarios.find(x => x.id === id);
+                        setJDraft({ ...jDraft, scenarioId: id, scenario: sc && !jDraft.scenario.trim() ? sc.title : jDraft.scenario });
+                      }} />
+                  </div>
                   <Field label="同卓者" value={jDraft.party}
                     onChange={(v) => setJDraft({ ...jDraft, party: v })}
                     placeholder="KP: 〇〇 / PL: △△(探索者名)、□□ など" />
@@ -2447,11 +2754,20 @@ function App() {
                         <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{j.date || "日付不明"}</span>
                         <span style={{ fontFamily: serif, fontSize: 18, flex: 1 }}>{j.scenario || "(シナリオ名未記入)"}</span>
                         {ch && (
-                          <span onClick={() => openEdit(ch)}
+                          <span onClick={() => openView(ch)}
                             style={{ fontFamily: serif, fontSize: 13, color: T.green, cursor: "pointer", textDecoration: "underline" }}>
                             {ch.name || "(名称未記入)"} のシートへ
                           </span>
                         )}
+                        {j.scenarioId && (() => {
+                          const sc = scenarios.find(x => x.id === j.scenarioId);
+                          return sc ? (
+                            <button onClick={() => { setScViewId(sc.id); setView("scenario"); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                              style={{ fontFamily: mono, fontSize: 11, color: T.gold, background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+                              📚 シナリオ管理で見る →
+                            </button>
+                          ) : null;
+                        })()}
                         <Btn small onClick={() => { setJournalFocusId(j.id); setJDraft({ ...j }); window.scrollTo({ top: 0, behavior: "smooth" }); }}>✎ 編集</Btn>
                         <button title="削除"
                           onClick={() => { if (confirm("この記録を削除しますか?")) persistJournal(journal.filter((x) => x.id !== j.id)); }}
@@ -2625,15 +2941,7 @@ function App() {
                           </div>
                         )}
                         {characters.length > 0 && (
-                          <div style={{ fontFamily: mono, fontSize: 11, color: T.dim }}>
-                            探索者タグを追加:
-                            {characters.slice(0, 12).map((c) => (
-                              <span key={c.id} onClick={() => addTag(c.name || "(名称未記入)")}
-                                style={{ cursor: "pointer", color: T.green, marginLeft: 8 }}>
-                                #{c.name || "?"}
-                              </span>
-                            ))}
-                          </div>
+                          <CharTagAdder characters={characters} currentTags={cur} onAdd={addTag} />
                         )}
                       </div>
                     );
@@ -2760,119 +3068,256 @@ function App() {
         {/* ===== シナリオ管理 ===== */}
         {view === "scenario" && (
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-              <div style={{ fontFamily: serif, fontSize: 22 }}>シナリオ管理 <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{scenarios.length} 件</span></div>
-              <Btn color={T.green} border={T.green} onClick={() => { setScDraft(blankScenario()); window.scrollTo({ top: 0, behavior: "smooth" }); }}>+ 追加</Btn>
-            </div>
-
-            {scDraft && (
-              <Section title={scenarios.some((x) => x.id === scDraft.id) ? "シナリオを編集 EDIT" : "シナリオを追加 ADD SCENARIO"}>
-                <div style={{ display: "grid", gap: 12 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr 1fr 1fr", gap: 12, alignItems: "end" }}>
-                    <Field label="シナリオ名 *" value={scDraft.title}
-                      onChange={(v) => setScDraft({ ...scDraft, title: v })} placeholder="例: 悪霊の家" />
-                    <Field label="著者・サークル" value={scDraft.author}
-                      onChange={(v) => setScDraft({ ...scDraft, author: v })} />
-                    <div>
-                      <Label>ルール</Label>
-                      <select value={scDraft.edition} onChange={(e) => setScDraft({ ...scDraft, edition: e.target.value })}
-                        style={{ ...inputStyle, padding: "8px 6px" }}>
-                        <option value="">指定なし</option>
-                        <option value="6e">第6版</option>
-                        <option value="7e">第7版</option>
-                        <option value="other">その他</option>
-                      </select>
-                    </div>
-                    <div>
-                      <Label>ステータス</Label>
-                      <select value={scDraft.status} onChange={(e) => setScDraft({ ...scDraft, status: e.target.value })}
-                        style={{ ...inputStyle, padding: "8px 6px" }}>
-                        {SCENARIO_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                      </select>
+            {/* ── 編集フォーム ── */}
+            {scDraft && (() => {
+              const SC_PRESETS = [
+                { label: "プレイ人数", tags: ["1人", "2人", "3人", "4人", "5人以上"] },
+                { label: "形式・向け", tags: ["新規向け", "継続可", "単発", "キャンペーン", "ソロ"] },
+              ];
+              return (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 8 }}>
+                    <Btn onClick={() => setScDraft(null)} small>← {scViewId ? "詳細に戻る" : "一覧に戻る"}</Btn>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {scenarios.some(x => x.id === scDraft.id) && (
+                        <Btn small color={T.red} border={T.red} onClick={() => {
+                          if (!window.confirm("このシナリオを削除しますか？")) return;
+                          persistScenarios(scenarios.filter(x => x.id !== scDraft.id));
+                          setScDraft(null); setScViewId(null);
+                        }}>削除</Btn>
+                      )}
+                      <Btn color={T.green} border={T.green} onClick={saveScenarioDraft}>保存する</Btn>
                     </div>
                   </div>
-                  <Field label="URL(購入先・紹介ページ等)" value={scDraft.url}
-                    onChange={(v) => setScDraft({ ...scDraft, url: v })} />
-                  <Area label="メモ" rows={3} value={scDraft.memo}
-                    onChange={(v) => setScDraft({ ...scDraft, memo: v })}
-                    placeholder="プレイ時間、参加人数、感想など" />
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <Btn color={T.green} border={T.green} onClick={() => {
-                      if (!scDraft.title.trim()) return;
-                      const sc = { ...scDraft, updatedAt: Date.now() };
-                      const exists = scenarios.some((x) => x.id === sc.id);
-                      persistScenarios(exists ? scenarios.map((x) => (x.id === sc.id ? sc : x)) : [sc, ...scenarios]);
-                      setScDraft(null);
-                    }}>保存する</Btn>
-                    <Btn onClick={() => setScDraft(null)}>キャンセル</Btn>
-                  </div>
-                </div>
-              </Section>
-            )}
-
-            <div style={{ marginBottom: 14, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-              <span onClick={() => setScFilter("")}
-                style={{ cursor: "pointer", fontFamily: mono, fontSize: 11, padding: "3px 10px", borderRadius: 10, border: `1px solid ${scFilter === "" ? T.gold : T.line}`, color: scFilter === "" ? T.gold : T.dim }}>
-                すべて ({scenarios.length})
-              </span>
-              {SCENARIO_STATUSES.map((s) => {
-                const n = scenarios.filter((x) => x.status === s).length;
-                return (
-                  <span key={s} onClick={() => setScFilter(s === scFilter ? "" : s)}
-                    style={{ cursor: "pointer", fontFamily: mono, fontSize: 11, padding: "3px 10px", borderRadius: 10, border: `1px solid ${scFilter === s ? SCENARIO_STATUS_COLORS[s] : T.line}`, color: scFilter === s ? SCENARIO_STATUS_COLORS[s] : T.dim }}>
-                    {s} ({n})
-                  </span>
-                );
-              })}
-            </div>
-
-            {scenarios.length === 0 && !scDraft && (
-              <div style={{ border: `1px dashed ${T.line}`, padding: 40, textAlign: "center", color: T.dim, fontFamily: serif, background: T.panel }}>
-                まだ登録がありません。「+ 追加」からシナリオを登録しましょう。
-              </div>
-            )}
-
-            <div style={{ display: "grid", gap: 10 }}>
-              {(scFilter ? scenarios.filter((x) => x.status === scFilter) : scenarios).map((sc) => {
-                const relJournals = journal.filter((j) => j.scenario === sc.title);
-                return (
-                  <div key={sc.id} style={{ background: T.panel, border: `1px solid ${T.line}`, borderLeft: `4px solid ${SCENARIO_STATUS_COLORS[sc.status] || T.dim}`, borderRadius: 2, padding: "12px 16px", boxShadow: "0 1px 3px rgba(46,42,35,0.08)" }}>
-                    <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-                      <span style={{ fontFamily: mono, fontSize: 10, color: "#fff", background: SCENARIO_STATUS_COLORS[sc.status] || T.dim, padding: "2px 8px", borderRadius: 8 }}>{sc.status}</span>
-                      {sc.edition && <span style={{ fontFamily: mono, fontSize: 10, color: T.dim, border: `1px solid ${T.line}`, padding: "1px 6px", borderRadius: 4 }}>{sc.edition === "6e" ? "第6版" : sc.edition === "7e" ? "第7版" : sc.edition}</span>}
-                      <span style={{ fontFamily: serif, fontSize: 17, flex: 1 }}>{sc.title}</span>
-                      {sc.author && <span style={{ fontFamily: serif, fontSize: 13, color: T.dim }}>{sc.author}</span>}
-                      <Btn small onClick={() => { setScDraft({ ...sc }); window.scrollTo({ top: 0, behavior: "smooth" }); }}>✎ 編集</Btn>
-                      <button onClick={() => { if (confirm("このシナリオを削除しますか?")) persistScenarios(scenarios.filter((x) => x.id !== sc.id)); }}
-                        style={{ background: "transparent", border: "none", color: T.red, cursor: "pointer", fontFamily: mono }}>×</button>
-                    </div>
-                    {sc.url && (
-                      <div style={{ marginTop: 6 }}>
-                        <a href={sc.url} target="_blank" rel="noreferrer"
-                          style={{ fontFamily: mono, fontSize: 11, color: T.green, textDecoration: "none" }}>リンク ↗</a>
+                  <Section title="基本情報">
+                    <div style={{ display: "grid", gap: 10 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr", gap: 10 }}>
+                        <Field label="シナリオ名 *" value={scDraft.title} onChange={v => setScDraft({ ...scDraft, title: v })} placeholder="例: 悪霊の家" />
+                        <Field label="著者・サークル" value={scDraft.author} onChange={v => setScDraft({ ...scDraft, author: v })} />
                       </div>
-                    )}
-                    {sc.memo && (
-                      <div style={{ fontFamily: serif, fontSize: 13, color: T.dim, marginTop: 6, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{sc.memo}</div>
-                    )}
-                    {relJournals.length > 0 && (
-                      <div style={{ marginTop: 8, borderTop: `1px dashed ${T.line}`, paddingTop: 6, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-                        <span style={{ fontFamily: mono, fontSize: 10, color: T.gold }}>📔 日誌:</span>
-                        {relJournals.map((j) => {
+                      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
+                        <div>
+                          <Label>ルール</Label>
+                          <select value={scDraft.edition} onChange={e => setScDraft({ ...scDraft, edition: e.target.value })} style={{ ...inputStyle, padding: "8px 6px" }}>
+                            <option value="">指定なし</option>
+                            <option value="6e">第6版</option>
+                            <option value="7e">第7版</option>
+                            <option value="other">その他</option>
+                          </select>
+                        </div>
+                        <div>
+                          <Label>ステータス</Label>
+                          <select value={scDraft.status} onChange={e => setScDraft({ ...scDraft, status: e.target.value })} style={{ ...inputStyle, padding: "8px 6px" }}>
+                            {SCENARIO_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      <Field label="URL（購入先・紹介ページ等）" value={scDraft.url} onChange={v => setScDraft({ ...scDraft, url: v })} />
+                    </div>
+                  </Section>
+                  <Section title="タグ">
+                    {SC_PRESETS.map(group => (
+                      <div key={group.label} style={{ marginBottom: 10 }}>
+                        <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, marginBottom: 5 }}>{group.label}:</div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                          {group.tags.map(preset => {
+                            const active = (scDraft.tags || []).includes(preset);
+                            return (
+                              <button key={preset}
+                                onClick={() => setScDraft(prev => { const t = prev.tags || []; return { ...prev, tags: active ? t.filter(x => x !== preset) : [...t, preset] }; })}
+                                style={{ fontFamily: mono, fontSize: 10, cursor: "pointer", padding: "2px 10px", borderRadius: 10, border: `1px solid ${active ? T.gold : T.line}`, background: active ? T.gold : "transparent", color: active ? "#fff" : T.dim }}>
+                                {active ? "✓ " : ""}{preset}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5, padding: "6px 8px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 4, minHeight: 38, alignItems: "center" }}>
+                      {(scDraft.tags || []).map((tag, ti) => (
+                        <span key={ti} style={{ display: "inline-flex", alignItems: "center", gap: 3, background: T.panel2, border: `1px solid ${T.line}`, borderRadius: 10, padding: "2px 5px 2px 9px", fontFamily: mono, fontSize: 11, color: T.text }}>
+                          #{tag}
+                          <button onClick={() => setScDraft(prev => ({ ...prev, tags: (prev.tags || []).filter((_, j) => j !== ti) }))}
+                            style={{ background: "none", border: "none", color: T.dim, cursor: "pointer", padding: "0 2px", lineHeight: 1, fontSize: 13 }}>×</button>
+                        </span>
+                      ))}
+                      <input placeholder={(scDraft.tags || []).length === 0 ? "フリータグを入力してEnter…" : ""}
+                        style={{ flex: 1, minWidth: 100, background: "none", border: "none", outline: "none", fontFamily: mono, fontSize: 12, color: T.text }}
+                        onKeyDown={e => {
+                          const val = e.target.value.trim().replace(/,+$/, "");
+                          if ((e.key === "Enter" || e.key === ",") && val) {
+                            e.preventDefault();
+                            if (!(scDraft.tags || []).includes(val)) setScDraft(prev => ({ ...prev, tags: [...(prev.tags || []), val] }));
+                            e.target.value = "";
+                          } else if (e.key === "Backspace" && !e.target.value && (scDraft.tags || []).length > 0) {
+                            setScDraft(prev => ({ ...prev, tags: prev.tags.slice(0, -1) }));
+                          }
+                        }} />
+                    </div>
+                    <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, marginTop: 4 }}>Enter またはカンマで追加 / Backspace で末尾削除</div>
+                  </Section>
+                  <Section title="メモ">
+                    <Area rows={4} value={scDraft.memo} onChange={v => setScDraft({ ...scDraft, memo: v })} placeholder="プレイ時間、感想、注意事項など…" />
+                  </Section>
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+                    <Btn onClick={() => setScDraft(null)} small>キャンセル</Btn>
+                    <Btn color={T.green} border={T.green} onClick={saveScenarioDraft}>保存する</Btn>
+                  </div>
+                </>
+              );
+            })()}
+
+            {/* ── 詳細ビュー ── */}
+            {!scDraft && scViewId && (() => {
+              const sc = scenarios.find(x => x.id === scViewId);
+              if (!sc) { setScViewId(null); return null; }
+              const statusColor = SCENARIO_STATUS_COLORS[sc.status] || T.dim;
+              const relJournals = journal.filter(j => j.scenarioId === sc.id || j.scenario === sc.title);
+              return (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 8 }}>
+                    <Btn onClick={() => setScViewId(null)} small>← 一覧に戻る</Btn>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <Btn small color={T.red} border={T.red} onClick={() => {
+                        if (!window.confirm("このシナリオを削除しますか？")) return;
+                        persistScenarios(scenarios.filter(x => x.id !== sc.id)); setScViewId(null);
+                      }}>削除</Btn>
+                      <Btn color={T.gold} border={T.gold} onClick={() => { setScDraft({ ...sc, tags: sc.tags || [] }); window.scrollTo({ top: 0, behavior: "smooth" }); }}>✎ 編集</Btn>
+                    </div>
+                  </div>
+                  <div style={{ background: "#ffffff", border: "1px solid #e2ddd8", borderLeft: `4px solid ${statusColor}`, borderRadius: 4, padding: "18px 20px", marginBottom: 16 }}>
+                    <div style={{ fontFamily: serif, fontSize: 22, fontWeight: "bold", color: "#1a1a1a", marginBottom: 6 }}>{sc.title}</div>
+                    {sc.author && <div style={{ fontFamily: serif, fontSize: 14, color: "#666", marginBottom: 10 }}>by {sc.author}</div>}
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 12 }}>
+                      <span style={{ fontFamily: mono, fontSize: 10, color: statusColor, border: `1px solid ${statusColor}66`, background: statusColor + "18", borderRadius: 10, padding: "2px 9px" }}>{sc.status}</span>
+                      {sc.edition && <span style={{ fontFamily: mono, fontSize: 10, color: "#777", border: "1px solid #ddd", background: "#f5f3ef", borderRadius: 10, padding: "2px 9px" }}>{sc.edition === "6e" ? "CoC6版" : sc.edition === "7e" ? "CoC7版" : sc.edition}</span>}
+                      {(sc.tags || []).map((tag, ti) => (
+                        <span key={ti} style={{ fontFamily: mono, fontSize: 10, color: "#666", border: "1px solid #ddd", background: "#f0ede8", borderRadius: 10, padding: "2px 9px" }}>#{tag}</span>
+                      ))}
+                    </div>
+                    {sc.url && <div style={{ marginBottom: 10 }}><a href={sc.url} target="_blank" rel="noreferrer" style={{ fontFamily: mono, fontSize: 12, color: "#2a7a4f", textDecoration: "none" }}>{sc.url.replace(/^https?:\/\//, "").slice(0, 60)} ↗</a></div>}
+                    {sc.memo && <div style={{ fontFamily: serif, fontSize: 14, color: "#333", lineHeight: 1.8, whiteSpace: "pre-wrap", borderTop: "1px solid #eee", paddingTop: 12 }}>{sc.memo}</div>}
+                  </div>
+                  {relJournals.length > 0 && (
+                    <Section title="関連セッション日誌">
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {relJournals.map(j => {
                           const ch = charById(j.characterId);
                           return (
                             <span key={j.id} onClick={() => { setJournalFocusId(j.id); setView("journal"); }}
-                              style={{ fontFamily: serif, fontSize: 12, color: T.green, cursor: "pointer", textDecoration: "underline" }}>
+                              style={{ fontFamily: serif, fontSize: 13, color: T.green, cursor: "pointer", textDecoration: "underline" }}>
                               {j.date || "日付不明"}{ch ? ` (${ch.name})` : ""}
                             </span>
                           );
                         })}
                       </div>
-                    )}
+                    </Section>
+                  )}
+                  {(() => {
+                    const linkedGm = gmSessions.filter(s => s.scenarioId === sc.id);
+                    const linkedEvents = events.filter(ev => ev.scenarioId === sc.id && ev.cat === "TRPG");
+                    if (!linkedGm.length && !linkedEvents.length) return null;
+                    return (
+                      <>
+                        {linkedGm.length > 0 && (
+                          <Section title="関連GMシート">
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              {linkedGm.map(s => (
+                                <div key={s.id} onClick={() => { setGmViewId(s.id); setView("gm"); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                                  style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "7px 10px", background: "#ffffff", border: "1px solid #e2ddd8", borderRadius: 6 }}>
+                                  <span style={{ fontFamily: serif, fontSize: 13, color: T.text, flex: 1 }}>{s.title || "無題"}</span>
+                                  {s.date && <span style={{ fontFamily: mono, fontSize: 11, color: T.dim }}>{s.date}</span>}
+                                  {s.status && <span style={{ fontFamily: mono, fontSize: 10, color: T.gold, border: `1px solid ${T.gold}`, borderRadius: 8, padding: "1px 7px" }}>{s.status}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          </Section>
+                        )}
+                        {linkedEvents.length > 0 && (
+                          <Section title="関連TRPG予定">
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              {linkedEvents.map(ev => (
+                                <div key={ev.id} onClick={() => { setView("calendar"); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                                  style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "7px 10px", background: "#ffffff", border: "1px solid #e2ddd8", borderRadius: 6 }}>
+                                  {ev.date && <span style={{ fontFamily: mono, fontSize: 11, color: T.dim, flexShrink: 0 }}>{ev.date}</span>}
+                                  {ev.role && <span style={{ fontFamily: mono, fontSize: 10, color: T.green, border: `1px solid ${T.green}`, borderRadius: 8, padding: "1px 7px", flexShrink: 0 }}>{ev.role}</span>}
+                                  <span style={{ fontFamily: serif, fontSize: 13, color: T.text, flex: 1 }}>{ev.title || "無題"}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </Section>
+                        )}
+                      </>
+                    );
+                  })()}
+                </>
+              );
+            })()}
+
+            {/* ── 一覧 ── */}
+            {!scDraft && !scViewId && (() => {
+              const scFiltered = scenarios
+                .filter(sc => !scFilter || sc.status === scFilter)
+                .filter(sc => {
+                  if (!scSearch.trim()) return true;
+                  const q = scSearch.trim().toLowerCase();
+                  return [sc.title, sc.author, sc.memo, ...(sc.tags || [])].some(f => (f || "").toLowerCase().includes(q));
+                });
+              return (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ fontFamily: serif, fontSize: 22 }}>シナリオ管理 <span style={{ fontFamily: mono, fontSize: 12, color: T.dim }}>{scenarios.length} 件</span></div>
+                    <Btn color={T.green} border={T.green} onClick={() => { setScDraft(blankScenario()); window.scrollTo({ top: 0, behavior: "smooth" }); }}>+ 追加</Btn>
                   </div>
-                );
-              })}
-            </div>
+                  <div style={{ marginBottom: 10, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                    <span onClick={() => setScFilter("")}
+                      style={{ cursor: "pointer", fontFamily: mono, fontSize: 11, padding: "3px 10px", borderRadius: 10, border: `1px solid ${scFilter === "" ? T.gold : T.line}`, color: scFilter === "" ? T.gold : T.dim }}>
+                      すべて ({scenarios.length})
+                    </span>
+                    {SCENARIO_STATUSES.map(s => {
+                      const n = scenarios.filter(x => x.status === s).length;
+                      return (
+                        <span key={s} onClick={() => setScFilter(scFilter === s ? "" : s)}
+                          style={{ cursor: "pointer", fontFamily: mono, fontSize: 11, padding: "3px 10px", borderRadius: 10, border: `1px solid ${scFilter === s ? SCENARIO_STATUS_COLORS[s] : T.line}`, color: scFilter === s ? SCENARIO_STATUS_COLORS[s] : T.dim }}>
+                          {s} ({n})
+                        </span>
+                      );
+                    })}
+                  </div>
+                  {scenarios.length > 0 && (
+                    <input placeholder="🔍 タイトル・著者・タグで検索…"
+                      value={scSearch} onChange={e => setScSearch(e.target.value)}
+                      style={{ ...inputStyle, width: "100%", marginBottom: 12, boxSizing: "border-box" }} />
+                  )}
+                  {scenarios.length === 0 && (
+                    <div style={{ border: `1px dashed ${T.line}`, padding: 40, textAlign: "center", color: T.dim, fontFamily: serif, background: T.panel }}>
+                      まだ登録がありません。「+ 追加」からシナリオを登録しましょう。
+                    </div>
+                  )}
+                  {scFiltered.length === 0 && scenarios.length > 0 && (
+                    <div style={{ fontFamily: serif, fontSize: 13, color: T.dim, textAlign: "center", padding: "28px 0" }}>条件に一致するシナリオはありません</div>
+                  )}
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {scFiltered.map(sc => {
+                      const statusColor = SCENARIO_STATUS_COLORS[sc.status] || T.dim;
+                      return (
+                        <div key={sc.id} onClick={() => { setScViewId(sc.id); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                          style={{ background: "#ffffff", border: "1px solid #e2ddd8", borderLeft: `4px solid ${statusColor}`, borderRadius: 4, padding: "12px 16px", cursor: "pointer" }}>
+                          <div style={{ fontFamily: serif, fontSize: 15, fontWeight: "bold", color: "#1a1a1a", marginBottom: 7 }}>{sc.title || "無題のシナリオ"}</div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                            <span style={{ fontFamily: mono, fontSize: 10, color: statusColor, border: `1px solid ${statusColor}66`, background: statusColor + "18", borderRadius: 10, padding: "1px 8px" }}>{sc.status}</span>
+                            {sc.edition && <span style={{ fontFamily: mono, fontSize: 10, color: "#777", border: "1px solid #ddd", background: "#f5f3ef", borderRadius: 10, padding: "1px 8px" }}>{sc.edition === "6e" ? "CoC6版" : sc.edition === "7e" ? "CoC7版" : sc.edition}</span>}
+                            {(sc.tags || []).map((tag, ti) => (
+                              <span key={ti} style={{ fontFamily: mono, fontSize: 10, color: "#666", border: "1px solid #ddd", background: "#f0ede8", borderRadius: 10, padding: "1px 8px" }}>#{tag}</span>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         )}
 
@@ -3138,28 +3583,24 @@ function App() {
                     const statusColor = GM_STATUS_COLORS[s.status || "GM予定"];
                     return (
                       <div key={s.id} onClick={() => { setGmViewId(s.id); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-                        style={{ background: T.cardBg, border: `1px solid ${T.line}`, borderLeft: `4px solid ${statusColor}`, borderRadius: 4, padding: "14px 16px", marginBottom: 10, cursor: "pointer" }}>
+                        style={{ background: "#ffffff", border: "1px solid #e2ddd8", borderLeft: `4px solid ${statusColor}`, borderRadius: 4, padding: "14px 16px", marginBottom: 10, cursor: "pointer" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 6 }}>
                           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                            <span style={{ fontFamily: mono, fontSize: 10, border: `1px solid ${statusColor}`, color: statusColor, borderRadius: 3, padding: "1px 7px" }}>{s.status || "GM予定"}</span>
-                            <div style={{ fontFamily: serif, fontSize: 16, fontWeight: "bold", color: T.text }}>{s.title || "無題のセッション"}</div>
+                            <span style={{ fontFamily: mono, fontSize: 10, border: `1px solid ${statusColor}66`, color: statusColor, background: statusColor + "18", borderRadius: 10, padding: "1px 8px" }}>{s.status || "GM予定"}</span>
+                            <div style={{ fontFamily: serif, fontSize: 16, fontWeight: "bold", color: "#1a1a1a" }}>{s.title || "無題のセッション"}</div>
                           </div>
                           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                            {s.date && <span style={{ fontFamily: mono, fontSize: 10, color: T.gold, border: `1px solid ${T.gold}`, borderRadius: 3, padding: "1px 7px" }}>{s.date}</span>}
-                            {s.discordUrl && <a href={s.discordUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ fontFamily: mono, fontSize: 10, color: "#5865F2", border: "1px solid #5865F2", borderRadius: 3, padding: "1px 7px", textDecoration: "none" }}>Discord</a>}
-                            {s.cocofoliaUrl && <a href={s.cocofoliaUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ fontFamily: mono, fontSize: 10, color: T.green, border: `1px solid ${T.green}`, borderRadius: 3, padding: "1px 7px", textDecoration: "none" }}>ここふぉりあ</a>}
+                            {s.date && <span style={{ fontFamily: mono, fontSize: 10, color: "#8a6a1c", border: "1px solid #c9a84c66", background: "#c9a84c18", borderRadius: 10, padding: "1px 8px" }}>{s.date}</span>}
+                            {s.discordUrl && <a href={s.discordUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ fontFamily: mono, fontSize: 10, color: "#5865F2", border: "1px solid #5865F266", borderRadius: 10, padding: "1px 8px", textDecoration: "none" }}>Discord</a>}
+                            {s.cocofoliaUrl && <a href={s.cocofoliaUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ fontFamily: mono, fontSize: 10, color: "#2a7a4f", border: "1px solid #4a9a6f66", borderRadius: 10, padding: "1px 8px", textDecoration: "none" }}>ここふぉりあ</a>}
                           </div>
                         </div>
-                        {s.scenarioTitle && <div style={{ fontFamily: serif, fontSize: 13, color: T.dim, marginTop: 6 }}>📖 {s.scenarioTitle}</div>}
+                        {s.scenarioTitle && <div style={{ fontFamily: serif, fontSize: 13, color: "#666", marginTop: 6 }}>📖 {s.scenarioTitle}</div>}
                         {s.players && s.players.length > 0 && (
                           <div style={{ marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                            <span style={{ fontFamily: mono, fontSize: 11, color: T.dim }}>
-                              👥 {s.players.map(p => p.plName || "?").join(" / ")}
-                            </span>
+                            <span style={{ fontFamily: mono, fontSize: 11, color: "#777" }}>👥 {s.players.map(p => p.plName || "?").join(" / ")}</span>
                             {s.players.some(p => p.charName) && (
-                              <span style={{ fontFamily: serif, fontSize: 11, color: T.dim }}>
-                                🎭 {s.players.filter(p => p.charName).map(p => p.charName).join(" / ")}
-                              </span>
+                              <span style={{ fontFamily: serif, fontSize: 11, color: "#777" }}>🎭 {s.players.filter(p => p.charName).map(p => p.charName).join(" / ")}</span>
                             )}
                           </div>
                         )}
@@ -3194,10 +3635,20 @@ function App() {
                     </div>
                   </div>
 
-                  {(s.scenarioTitle || s.scenarioUrl) && (
+                  {(s.scenarioTitle || s.scenarioUrl || s.scenarioId) && (
                     <Section title="シナリオ">
                       {s.scenarioTitle && <div style={{ fontFamily: serif, fontSize: 15, color: T.text, marginBottom: 6 }}>📖 {s.scenarioTitle}</div>}
-                      {s.scenarioUrl && <a href={s.scenarioUrl} target="_blank" rel="noreferrer" style={{ fontFamily: mono, fontSize: 11, color: T.green, textDecoration: "none" }}>{s.scenarioUrl} ↗</a>}
+                      {s.scenarioUrl && <div style={{ marginBottom: 8 }}><a href={s.scenarioUrl} target="_blank" rel="noreferrer" style={{ fontFamily: mono, fontSize: 11, color: T.green, textDecoration: "none" }}>{s.scenarioUrl} ↗</a></div>}
+                      {s.scenarioId && (() => {
+                        const sc = scenarios.find(x => x.id === s.scenarioId);
+                        if (!sc) return null;
+                        return (
+                          <button onClick={() => { setScViewId(sc.id); setView("scenario"); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 6, fontFamily: serif, fontSize: 13, color: T.gold, background: "none", border: `1px solid ${T.gold}`, borderRadius: 4, padding: "5px 12px", cursor: "pointer" }}>
+                            📚 シナリオ管理で見る →
+                          </button>
+                        );
+                      })()}
                     </Section>
                   )}
 
@@ -3285,7 +3736,16 @@ function App() {
                 <Section title="シナリオ">
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <div>
-                      <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, marginBottom: 4 }}>タイトル</div>
+                      <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, marginBottom: 4 }}>シナリオ管理と連携（任意）</div>
+                      <ScenarioPicker scenarios={scenarios} value={gmDraft.scenarioId || ""}
+                        onChange={id => {
+                          const sc = scenarios.find(x => x.id === id);
+                          setGmDraft({ ...gmDraft, scenarioId: id, scenarioTitle: sc ? sc.title : gmDraft.scenarioTitle });
+                        }} />
+                      {gmDraft.scenarioId && <div style={{ fontFamily: mono, fontSize: 10, color: T.green, marginTop: 4 }}>✓ シナリオ管理のエントリと連携中</div>}
+                    </div>
+                    <div>
+                      <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, marginBottom: 4 }}>シナリオタイトル（手入力 / 補足）</div>
                       <input value={gmDraft.scenarioTitle} onChange={e => setGmDraft({ ...gmDraft, scenarioTitle: e.target.value })} placeholder="シナリオタイトル" style={inputStyle} />
                     </div>
                     <div>
@@ -3387,36 +3847,47 @@ function App() {
                     const c = characters.find(c => c.id === id);
                     return c ? (c.name || "") : "";
                   }).join(" ");
-                  return [n.title, n.memo, charNames, ...(n.links || []).map(l => l.label + " " + l.url)]
+                  return [n.title, n.memo, charNames, ...(n.tags || []), ...(n.links || []).map(l => l.label + " " + l.url)]
                     .some(f => (f || "").toLowerCase().includes(q));
                 }).map(n => {
                   const charTags = n.characterIds.map(id => characters.find(c => c.id === id)).filter(Boolean);
+                  const accent = charTags[0]?.color || "#8A6A9E";
                   return (
                     <div key={n.id}
-                      onClick={() => { setNetaDraft({ ...n, links: n.links ? n.links.map(l => ({ ...l })) : [] }); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-                      style={{ background: T.cardBg, border: `1px solid ${T.line}`, borderLeft: `4px solid #8A6A9E`, borderRadius: 4, padding: "14px 16px", marginBottom: 10, cursor: "pointer" }}>
+                      onClick={() => { setNetaDraft({ ...n, tags: n.tags || [], links: n.links ? n.links.map(l => ({ ...l })) : [] }); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                      style={{ background: "#ffffff", border: "1px solid #e2ddd8", borderLeft: `4px solid ${accent}`, borderRadius: 4, padding: "14px 16px", marginBottom: 10, cursor: "pointer" }}>
                       {n.title && (
-                        <div style={{ fontFamily: serif, fontSize: 16, fontWeight: "bold", marginBottom: 6 }}>{n.title}</div>
+                        <div style={{ fontFamily: serif, fontSize: 16, fontWeight: "bold", marginBottom: 6, color: "#1a1a1a" }}>{n.title}</div>
                       )}
                       {charTags.length > 0 && (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 6 }}>
-                          {charTags.map(c => (
-                            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 3, background: T.panel2, border: `1px solid ${T.green}`, borderRadius: 10, padding: "2px 8px 2px 5px" }}>
-                              {c.iconUrl && <img src={c.iconUrl} alt="" onError={e => { e.target.style.display = "none"; }} style={{ width: 14, height: 14, objectFit: "cover", objectPosition: "top", borderRadius: 2 }} />}
-                              <span style={{ fontFamily: serif, fontSize: 11, color: T.green }}>{c.name || "(名称未記入)"}</span>
-                            </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 5 }}>
+                          {charTags.map(c => {
+                            const cc = c.color || "#8A6A9E";
+                            return (
+                              <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 3, background: cc + "18", border: `1px solid ${cc}66`, borderRadius: 10, padding: "2px 8px 2px 5px" }}>
+                                {c.iconUrl && <img src={c.iconUrl} alt="" onError={e => { e.target.style.display = "none"; }} style={{ width: 14, height: 14, objectFit: "cover", objectPosition: "top", borderRadius: 2 }} />}
+                                <span style={{ fontFamily: serif, fontSize: 11, color: cc }}>{c.name || "(名称未記入)"}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {n.tags && n.tags.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
+                          {n.tags.map((tag, ti) => (
+                            <span key={ti} style={{ fontFamily: mono, fontSize: 10, color: "#666", background: "#f0ede8", border: "1px solid #ddd", borderRadius: 10, padding: "1px 8px" }}>#{tag}</span>
                           ))}
                         </div>
                       )}
                       {n.memo && (
-                        <div style={{ fontFamily: serif, fontSize: 13, color: T.text, whiteSpace: "pre-wrap", overflow: "hidden", maxHeight: 72, lineHeight: 1.65 }}>{n.memo}</div>
+                        <div style={{ fontFamily: serif, fontSize: 13, color: "#333", whiteSpace: "pre-wrap", overflow: "hidden", maxHeight: 72, lineHeight: 1.65 }}>{n.memo}</div>
                       )}
                       {n.links && n.links.filter(l => l.url).length > 0 && (
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
                           {n.links.filter(l => l.url).map(l => (
                             <a key={l.id} href={l.url} target="_blank" rel="noreferrer"
                               onClick={e => e.stopPropagation()}
-                              style={{ fontFamily: mono, fontSize: 11, color: T.green, textDecoration: "none", border: `1px solid ${T.line}`, padding: "2px 8px", borderRadius: 2 }}>
+                              style={{ fontFamily: mono, fontSize: 11, color: accent, textDecoration: "none", border: "1px solid #e0ddd8", padding: "2px 8px", borderRadius: 2 }}>
                               {l.label || l.url.replace(/^https?:\/\//, "").slice(0, 30)}↗
                             </a>
                           ))}
@@ -3447,6 +3918,35 @@ function App() {
                 <Section title="探索者タグ">
                   <CharTagPicker characters={characters} value={netaDraft.characterIds}
                     onChange={ids => setNetaDraft({ ...netaDraft, characterIds: ids })} />
+                </Section>
+
+                <Section title="フリータグ">
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5, padding: "6px 8px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 4, minHeight: 38, alignItems: "center" }}>
+                    {(netaDraft.tags || []).map((tag, ti) => (
+                      <span key={ti} style={{ display: "inline-flex", alignItems: "center", gap: 3, background: T.panel2, border: `1px solid ${T.line}`, borderRadius: 10, padding: "2px 5px 2px 9px", fontFamily: mono, fontSize: 11, color: T.text }}>
+                        #{tag}
+                        <button onClick={() => setNetaDraft(prev => ({ ...prev, tags: (prev.tags || []).filter((_, j) => j !== ti) }))}
+                          style={{ background: "none", border: "none", color: T.dim, cursor: "pointer", padding: "0 2px", lineHeight: 1, fontSize: 13 }}>×</button>
+                      </span>
+                    ))}
+                    <input
+                      placeholder={(netaDraft.tags || []).length === 0 ? "タグを入力してEnter…" : ""}
+                      style={{ flex: 1, minWidth: 100, background: "none", border: "none", outline: "none", fontFamily: mono, fontSize: 12, color: T.text }}
+                      onKeyDown={e => {
+                        const val = e.target.value.trim().replace(/,+$/, "");
+                        if ((e.key === "Enter" || e.key === ",") && val) {
+                          e.preventDefault();
+                          if (!(netaDraft.tags || []).includes(val)) {
+                            setNetaDraft(prev => ({ ...prev, tags: [...(prev.tags || []), val] }));
+                          }
+                          e.target.value = "";
+                        } else if (e.key === "Backspace" && !e.target.value && (netaDraft.tags || []).length > 0) {
+                          setNetaDraft(prev => ({ ...prev, tags: prev.tags.slice(0, -1) }));
+                        }
+                      }}
+                    />
+                  </div>
+                  <div style={{ fontFamily: mono, fontSize: 10, color: T.dim, marginTop: 4 }}>Enter またはカンマで追加 / Backspace で末尾削除</div>
                 </Section>
 
                 <Section title="メモ">
@@ -3832,7 +4332,7 @@ function App() {
         {view === "edit" && draft && (
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18, flexWrap: "wrap", gap: 8 }}>
-              <Btn onClick={() => setView("list")} small>← 名簿に戻る</Btn>
+              <Btn onClick={() => charViewId ? setView("char") : setView("list")} small>← {charViewId ? "閲覧に戻る" : "名簿に戻る"}</Btn>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 {savedFlash && <span style={{ fontFamily: mono, fontSize: 11, color: T.green }}>保存しました</span>}
                 <Btn onClick={() => { setIoOpen(!ioOpen); setIoMsg(""); }} small color={T.gold} border={T.gold}>
