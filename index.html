@@ -592,6 +592,137 @@ const blankIllust = () => ({
   createdAt: new Date().toISOString(),
 });
 
+const FLAVOR_TABLES = {
+  bs: { label: "バックストーリー断片", items: [
+    "幼い頃に一度だけ、行方不明だった親戚が「帰ってきた」のを見た。誰もその話を信じてくれない。",
+    "故郷の家には、開かずの間が一つある。鍵は祖母が亡くなる前に飲み込んだ、と噂されている。",
+    "学生時代、ある教授に可愛がられたが、その人物はある日突然、研究室ごと姿を消した。",
+    "幼少期の数年間の記憶がすっぽり抜けている。家族はその時期の話を頑なに避ける。",
+    "若い頃に短期間だけ入った組織がある。抜けたはずなのに、年に一度だけ手紙が届く。",
+    "兄弟がいたはずだという確信があるが、戸籍にも写真にも、その存在の痕跡がない。",
+    "ある古い指輪を肌身離さず持っている。理由は自分でも説明できない。",
+    "子どもの頃、夢の中で繰り返し同じ家を訪れていた。先日、現実でその家を見つけてしまった。",
+    "かつて世話になった人物が、自分には決して「あの夜のこと」を口外するなと遺言した。",
+    "実家の蔵から出てきた古い日記の筆跡が、なぜか自分のものとそっくりだった。",
+    "十代の頃、一週間だけ記憶が飛んでいる。目が覚めたら知らない町の旅館にいた。",
+    "尊敬していた父の書斎に、死後初めて入った。棚の裏に隠し扉が一枚あった。",
+    "かつて通った図書館で、自分の名前が書き込まれた本を見つけた。筆跡は子供のものではなかった。",
+    "十年以上前に亡くなったはずの人物から、先月、年賀状が届いた。",
+    "子どもの頃に描いた絵を見返したら、自分が生まれる前に建てられ焼失した建物がそこにあった。",
+    "初めて会ったはずの人に「また会いましたね」と言われ続けている。",
+    "ある職業に強い拒絶感がある。なぜ嫌いなのか、理由を思い出せない。",
+    "遠縁の葬儀に出た帰り道、喪主に「あなたが来るとは思わなかった」と言われた。面識がないのに。",
+    "故郷の言葉で、特定の単語だけ発音できない。発しようとすると喉が詰まる。",
+    "古い写真の中に、明らかに現代の服装をした人物が一人だけ混じっていた。",
+    "子どもの頃に習っていた楽器を、二十年ぶりに引っ張り出した。指が覚えていた。",
+    "実家を出るとき、母が「これだけは持っていきなさい」と渡したものがある。使い道はよくわからない。",
+    "昔よく行った食堂が閉店していた。壁に貼ってあったメニューの値段が今でも頭に入っている。",
+    "学生時代に書いた日記が出てきた。当時の自分の文体が今とまったく違って、他人みたいだった。",
+    "一人暮らしを始めた年に、初めて自分で料理を覚えた。レシピは今も同じものを使っている。",
+  ]},
+  rel: { label: "人間関係の種", items: [
+    "命を救ってくれた恩人がいるが、その人は今、別の探索者の宿敵になっているらしい。",
+    "数年前に絶縁した友人。最近、その友人の名前で自分宛に荷物が届くようになった。",
+    "信頼していた相棒に、一度だけ取り返しのつかない裏切りをされたことがある。まだ顔を見ると胸がざわつく。",
+    "今でも月命日に墓参りを欠かさない相手がいる。その死には、どうしても腑に落ちない点がある。",
+    "面倒を見ている年下がいる。本人には言えないが、その子の親の死には自分が関わっている。",
+    "かつての恋人が、まったく別人のような目をして再会の場に現れた。",
+    "頼れる情報屋がいるが、最近その人物の正体に確信が持てなくなってきた。",
+    "家族とは絶縁状態だが、唯一、祖父だけは時々こっそり連絡をくれる。",
+    "恩師の遺品を預かったまま、まだ遺族に渡せずにいる。中身を見るのが怖い。",
+    "「困ったら訪ねろ」と言われた住所がある。まだ一度も使っていないが、お守りのように覚えている。",
+    "幼馴染みが突然引っ越した。新しい住所を教えてくれないまま、年賀状だけが毎年届く。",
+    "ある人物の名前を聞くたびに、理由のわからない罪悪感が湧いてくる。",
+    "かつての師匠が「お前に謝らなければならないことがある」と言ったまま、翌日姿を消した。",
+    "昔助けた見知らぬ子どもが、大人になって自分の前に現れた。その目に恨みの色がある。",
+    "長年の親友が最近、自分と話すとき妙に言葉を選ぶようになった。何かを隠している。",
+    "かつて同じ夢を見たと話した相手が、夢の内容を細部まで知っていた。教えた覚えはない。",
+    "死んだはずの人物の声で電話がかかってきたことがある。内容を誰かに話す気になれない。",
+    "ある一人の人物を、複数の無関係な知人が全員「危ない人だ」と口を揃えて言う。",
+    "子どもの頃の親友と再会したら、互いの記憶する「あの出来事」の内容が全く食い違っていた。",
+    "訃報を受けて葬儀に行ったら、当人がそこに立っていた。本人は何も覚えていない様子だった。",
+    "昔お世話になった近所のおばさんが、いまだに誕生日に手紙をくれる。",
+    "学生時代のアルバイト先の店長に、社会人になってから飲みに誘われた。思ったより話が合った。",
+    "幼い頃よく遊んだ公園に久しぶりに行ったら、当時と変わらず同じベンチがあった。",
+    "旧友に数年ぶりに連絡したら、向こうもちょうど連絡しようとしていたと言われた。",
+    "職場の後輩が、自分が昔もらったのと同じアドバイスを求めてきた。あの頃の自分を思い出した。",
+  ]},
+  act: { label: "小芝居・リアクション", items: [
+    "緊張すると、無意識に左手の指で何かを数えるような仕草をする。",
+    "恐怖を感じると饒舌になる。早口で関係ない蘊蓄を語り出して、仲間に呆れられる。",
+    "嘘をつくとき、必ず一度だけ眼鏡（か髪、襟元）に触れる癖がある。",
+    "古い建物に入ると、まず天井の隅を確認してしまう。本人も理由は知らない。",
+    "驚くと声が出ない代わりに、思いきり後ずさってしまう。",
+    "考え事をするとき、小銭やボタンを指先で転がす。落とすと我に返る。",
+    "誰かが死ぬと、その場で必ず一拍、目を閉じて黙祷する。誰に教わったかは覚えていない。",
+    "暗がりに入る前、いつも小さく口の中で同じ言葉を唱える。願掛けのようなもの。",
+    "笑ってはいけない場面ほど、頬の内側を噛んで耐えようとする。",
+    "電話が鳴ると、出る前に必ず深呼吸を一つ入れる。昔、悪い報せを受けすぎたから。",
+    "初対面の人間に対して、握手より先に靴を確認する癖がある。",
+    "不快な話を聞かされると、ポケットの中のものを強く握りしめる。",
+    "部屋に入るたびに出口の数を数える。三つ以下だと少し落ち着かなくなる。",
+    "自分の名前を大声で呼ばれると、一瞬だけ返事ができなくなる。",
+    "何かを決断する前に、必ず同じ言葉を心の中で三度繰り返す。",
+    "特定の匂いを嗅ぐと、言葉にできない感情が込み上げて黙り込む。",
+    "怒りを抑えるとき、舌先で歯の裏側をゆっくりなぞる。",
+    "追い詰められるほど笑顔になる。仲間には不気味がられている。",
+    "初めての場所に入ると、まず壁に背をつけられる場所を探す。",
+    "別れ際、相手の顔をじっと見て記憶しようとする癖がある。また会えないかもしれないから。",
+    "人の話を聞くとき、相槌の代わりにゆっくり一度だけ瞬きする。",
+    "美味しいものを食べると、思わず目を閉じる。無意識の癖だと後から言われた。",
+    "褒められると素直に受け取れず、つい「たまたまです」と言ってしまう。",
+    "道に迷っても絶対に人に聞かない。いつも何とかなると思っているから。",
+    "相手が話し終わる前に返事を考え始める悪い癖がある。",
+    "会話が盛り上がると、知らぬ間に前のめりになっている。",
+    "気が乗らない集まりでも、行ってみると案外楽しんでしまうタイプ。",
+    "財布の中のレシートをなかなか捨てられない。なんとなく記録として取っておきたい。",
+  ]},
+  day: { label: "日常の出来事", items: [
+    "馴染みの喫茶店のマスターが、最近やけに自分の動向を気にしている気がする。",
+    "通勤路の電柱に、見覚えのない古い尋ね人のビラがいつの間にか貼られていた。",
+    "アパートの隣室から、夜中にだけ、規則正しい物音が聞こえる日がある。",
+    "先週から、行く先々で同じ柄の傘を持った人物を見かける。",
+    "買った覚えのない本が、本棚に一冊だけ増えている。栞が挟まったまま。",
+    "近所の野良猫が、ある日を境にぱったり姿を見せなくなった。",
+    "郵便受けに、宛名のない白い封筒が入っていた。中身は古い写真が一枚。",
+    "馴染みの定食屋が、理由も告げず三日間だけ休業していた。再開後、店主が別人のように無口になった。",
+    "夜道で、誰かが自分の名を呼んだ気がして振り返ったが、誰もいなかった。これで三度目。",
+    "携帯に、自分の番号から着信履歴が残っていた。出た覚えはない。",
+    "いつも時刻が合っていた置き時計が、朝になると必ず三分だけ進んでいる。",
+    "ゴミ捨て場に、自分が捨てたはずのものがいつの間にか戻っている。",
+    "なぜか知らない人に道をよく聞かれる日がある。決まって同じ場所への道を。",
+    "図書館で返却した本に、自分では書いた覚えのない書き込みがあったと後日言われた。",
+    "毎朝同じ夢を見る。内容は覚えていないが、目覚めると左手だけが疲れている。",
+    "近所の公園の砂場に、毎朝同じ形のくぼみが作られている。誰が何のためにかは謎。",
+    "通りがかった廃屋の窓から、明かりが見えた気がした。調べたら電気は通っていなかった。",
+    "乗ったタクシーの運転手が、降りる場所を告げる前から正しい目的地へ向かっていた。",
+    "昨日あったはずの出来事を、誰も覚えていない。日記には確かに書いてあるのに。",
+    "鏡を見るたびに、一瞬だけ自分とは別の表情が映る気がして仕方ない。",
+    "行きつけの本屋で、店員に顔を覚えてもらっていた。少し嬉しかった。",
+    "雨の日に限って傘を忘れる。もう何本買ったかわからない。",
+    "駅のホームでいつも同じ時間に同じ人を見かける。お互い存在に気づいているが話したことはない。",
+    "休日の朝、特に予定もないのに早く目が覚めてしまう。",
+    "近所に新しい店ができると、つい気になって入ってしまう。",
+    "電車で席を譲ったら丁寧にお礼を言われた。それだけで一日の気分がよくなった。",
+    "冷蔵庫に賞味期限ギリギリのものが常に一品はある。",
+    "引き出しの奥に、何年も前の映画のチケットが出てきた。誰と行ったか覚えていない。",
+  ]},
+};
+const FLAVOR_CAT_LABEL = { bs: "BACKSTORY", rel: "RELATION", act: "GESTURE", day: "EVERYDAY" };
+const FLAVOR_CAT_COLORS = { bs: "#9a7b3f", rel: "#9b2335", act: "#2a6b68", day: "#4a6fa8" };
+const FLAVOR_CAT_BG = { bs: "#fff8e6", rel: "#fdf0ef", act: "#edf6f5", day: "#eef2f8" };
+const FLAVOR_CAT_NAMES = { bs: "バックストーリー断片", rel: "人間関係の種", act: "小芝居・リアクション", day: "日常の出来事" };
+const _flavorRecent = {};
+function flavorPick(cat) {
+  const pool = FLAVOR_TABLES[cat].items;
+  const recent = _flavorRecent[cat] || [];
+  const fresh = pool.filter(t => !recent.includes(t));
+  const src = fresh.length ? fresh : pool;
+  const text = src[Math.floor(Math.random() * src.length)];
+  _flavorRecent[cat] = [text, ...recent].slice(0, Math.min(5, pool.length - 1));
+  return text;
+}
+
 const SCENARIO_STATUSES = ["積み", "未プレイ", "プレイ中", "プレイ済", "GM用"];
 const SCENARIO_STATUS_COLORS = {
   "積み": "#6E675A", "未プレイ": "#3A6EA5", "プレイ中": "#1F7A4D",
@@ -1279,6 +1410,82 @@ function App() {
     persistHealth({ ...health, [healthDate]: { ...(health[healthDate] || blankHealthEntry()), [field]: value } });
   };
 
+  /* 小ネタ帳（ガチャ） */
+  const FLAVOR_FAV_KEY = "coc-flavor-favs-v2";
+  const [flavorSelCats, setFlavorSelCats] = useState(new Set(["day"]));
+  const [flavorCount, setFlavorCount] = useState(3);
+  const [flavorResults, setFlavorResults] = useState([]);
+  const [flavorFavs, setFlavorFavs] = useState(() => { try { return JSON.parse(localStorage.getItem("coc-flavor-favs-v2")) || []; } catch { return []; } });
+  const saveFlavorFavs = (list) => { setFlavorFavs(list); try { localStorage.setItem(FLAVOR_FAV_KEY, JSON.stringify(list)); } catch {} };
+  const [aiApiKey, setAiApiKey] = useState(() => { try { return localStorage.getItem("coc-ai-apikey") || ""; } catch { return ""; } });
+  const [aiKeyInput, setAiKeyInput] = useState("");
+  const [aiKeyOpen, setAiKeyOpen] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const saveAiKey = (k) => { setAiApiKey(k); try { localStorage.setItem("coc-ai-apikey", k); } catch {} };
+
+  const generateFlavorByAI = async () => {
+    if (!aiApiKey) { setAiKeyOpen(true); return; }
+    setAiLoading(true);
+    setAiError("");
+    const cats = [...flavorSelCats];
+    const catLabels = cats.map(c => FLAVOR_CAT_NAMES[c]).join("、");
+    const prompt = `あなたはクトゥルフ神話TRPGのロールプレイ支援アシスタントです。
+以下のカテゴリから合計${flavorCount}件のフレーバーテキストを生成してください。
+カテゴリ: ${catLabels}
+
+カテゴリの説明:
+- バックストーリー断片: 探索者の過去のエピソード。懐かしい思い出・ほのぼのした体験・人生の転機など、必ずしも不穏でなくてよい
+- 人間関係の種: 他のキャラクターとの関係のきっかけ。温かいつながり・世話になった人・昔の友人など、ポジティブな関係も含む
+- 小芝居・リアクション: 特定の状況で出る仕草・癖・行動。日常的でかわいらしいものや少し笑えるものも歓迎
+- 日常の出来事: 日常生活で起きる出来事。ほっこりする体験・ちょっとした偶然・季節の風景なども含む
+
+重要: 生成する内容の約半数はほのぼのした・日常的な・ほっこりするものにしてください。残りは謎めいた・不思議な雰囲気のものにしてよいですが、極端に暗い・ホラー色が強いものは避けてください。
+
+各テキストは2〜3文程度で、TRPGのセッションでキャラクターに深みを与えられるものにしてください。
+結果はJSON形式で返してください:
+{"items": [{"cat": "bs|rel|act|day のいずれか", "text": "テキスト本文"}]}
+
+catの値は必ず bs, rel, act, day のいずれかにしてください。`;
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": aiApiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 1024,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error?.message || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      const raw = data.content?.[0]?.text || "";
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error("JSONが見つかりませんでした");
+      const parsed = JSON.parse(match[0]);
+      const items = (parsed.items || []).map((it, i) => ({
+        id: Date.now().toString(36) + i + Math.random().toString(36).slice(2),
+        cat: ["bs","rel","act","day"].includes(it.cat) ? it.cat : cats[0],
+        text: it.text,
+        aiGenerated: true,
+      }));
+      if (!items.length) throw new Error("生成結果が空でした");
+      setFlavorResults(items);
+    } catch (e) {
+      setAiError(e.message);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   /* 探索者ネタ帳 */
   const [netas, setNetas] = useState(() => netaStore.load());
   const [netaDraft, setNetaDraft] = useState(null);
@@ -1680,6 +1887,7 @@ function App() {
             {navItem("neta", "💡", "ネタ帳")}
             {navItem("illust", "🖼", "ギャラリー")}
             {navItem("health", "🩺", "体調記録")}
+            {navItem("flavor", "🃏", "小ネタ帳")}
             {isMobile && (
               <div onClick={() => setSyncOpen(true)}
                 style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 10px", cursor: "pointer", flex: "1 0 auto", minWidth: 64, color: syncStatus === "ok" ? T.green : syncStatus === "error" ? T.red : T.dim, fontFamily: serif, fontSize: 11 }}>
@@ -4661,6 +4869,216 @@ function App() {
             </div>
           </div>
         )}
+
+        {/* ===== 小ネタ帳 ===== */}
+        {view === "flavor" && (() => {
+          const catKeys = ["bs", "rel", "act", "day"];
+          /* チョーク風カラー */
+          const chalkColor = { bs: "#d4c890", rel: "#e8a0a8", act: "#90d4c0", day: "#a0c8e8" };
+          const BG = "#263326";
+          const CHALK = "#e8e4d4";
+          const DIM = "rgba(232,228,212,0.5)";
+          const toggleCat = (cat) => {
+            const next = new Set(flavorSelCats);
+            if (next.has(cat)) { if (next.size > 1) next.delete(cat); } else next.add(cat);
+            setFlavorSelCats(next);
+          };
+          const doDraw = () => {
+            const cats = [...flavorSelCats];
+            setFlavorResults(Array.from({ length: flavorCount }, (_, i) => {
+              const cat = cats[Math.floor(Math.random() * cats.length)];
+              return { id: Date.now().toString(36) + i + Math.random().toString(36).slice(2), cat, text: flavorPick(cat) };
+            }));
+          };
+          const addFav = (item) => {
+            if (flavorFavs.some(f => f.text === item.text)) return;
+            saveFlavorFavs([{ id: Date.now().toString(36), cat: item.cat, text: item.text }, ...flavorFavs]);
+          };
+          const addToNeta = (item) => {
+            const n = { ...blankNeta(), title: FLAVOR_CAT_NAMES[item.cat], memo: item.text, tags: [FLAVOR_CAT_NAMES[item.cat]] };
+            persistNetas([n, ...netas]);
+          };
+          const redraw = (idx) => {
+            setFlavorResults(flavorResults.map((r, i) => i === idx ? { ...r, id: Date.now().toString(36), text: flavorPick(r.cat) } : r));
+          };
+          const chalkBtn = (label, onClick, active) => (
+            <button onClick={onClick} style={{
+              fontFamily: serif, fontSize: 12, padding: "4px 11px", borderRadius: 3, cursor: "pointer",
+              background: active ? "rgba(232,228,212,0.25)" : "transparent",
+              color: CHALK, border: "1px solid rgba(232,228,212,0.35)",
+            }}>{label}</button>
+          );
+          const flavorCard = (item, idx) => {
+            const isSaved = flavorFavs.some(f => f.text === item.text);
+            const cc = chalkColor[item.cat] || CHALK;
+            const rot = ["0.6deg", "-0.7deg", "0.3deg", "-0.5deg"][idx % 4];
+            return (
+              <div key={item.id} style={{
+                background: "rgba(255,255,255,0.07)", border: `1px solid rgba(232,228,212,0.18)`,
+                borderTop: `2px solid ${cc}88`, borderRadius: 2, padding: "16px 16px 12px",
+                transform: `rotate(${rot})`, display: "flex", flexDirection: "column", gap: 10,
+              }}>
+                <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 3, color: cc, textTransform: "uppercase", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>{FLAVOR_CAT_LABEL[item.cat]} · {FLAVOR_CAT_NAMES[item.cat]}</span>
+                  {item.aiGenerated && <span style={{ fontSize: 8, letterSpacing: 1, color: "#90d4b8", border: "1px solid rgba(144,212,184,0.4)", borderRadius: 2, padding: "1px 5px" }}>AI</span>}
+                </div>
+                <div style={{ fontFamily: serif, fontSize: 14, lineHeight: 1.9, color: CHALK, flex: 1, letterSpacing: "0.02em" }}>
+                  {item.text}
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", borderTop: "1px dashed rgba(232,228,212,0.2)", paddingTop: 8 }}>
+                  {chalkBtn(isSaved ? "保存済✓" : "付箋に保存", () => addFav(item), isSaved)}
+                  {chalkBtn("ネタ帳に引用", () => { addToNeta(item); }, false)}
+                  {chalkBtn("コピー", () => navigator.clipboard?.writeText(item.text).catch(() => {}), false)}
+                  {chalkBtn("引き直す", () => redraw(idx), false)}
+                </div>
+              </div>
+            );
+          };
+          return (
+            /* 黒板ラッパー */
+            <div style={{
+              background: BG, borderRadius: 4, padding: "28px 24px 32px",
+              boxShadow: "inset 0 0 40px rgba(0,0,0,0.35), 0 6px 24px rgba(0,0,0,0.4)",
+              border: "6px solid #4a3520", minHeight: 400,
+              backgroundImage: "radial-gradient(rgba(255,255,255,0.015) 1px, transparent 1px)",
+              backgroundSize: "28px 28px",
+            }}>
+              {/* ヘッダー */}
+              <div style={{ textAlign: "center", marginBottom: 28, borderBottom: "1px solid rgba(232,228,212,0.2)", paddingBottom: 18 }}>
+                <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 4, color: DIM, marginBottom: 6 }}>KEEPER'S FIELD NOTEBOOK</div>
+                <div style={{ fontFamily: serif, fontSize: 26, color: CHALK, letterSpacing: "0.06em" }}>小ネタ帳</div>
+                <div style={{ fontFamily: serif, fontSize: 12, color: DIM, marginTop: 4 }}>― ひと匙の背景が、卓を生かす ―</div>
+              </div>
+
+              {/* カテゴリ選択 */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontFamily: mono, fontSize: 10, letterSpacing: 2, color: DIM, marginBottom: 10 }}>CATEGORY — カテゴリ（複数選択可）</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {catKeys.map(cat => {
+                    const on = flavorSelCats.has(cat);
+                    const cc = chalkColor[cat];
+                    return (
+                      <button key={cat} onClick={() => toggleCat(cat)} style={{
+                        fontFamily: serif, fontSize: 13, padding: "7px 16px", borderRadius: 2, cursor: "pointer",
+                        border: `2px solid ${cc}`,
+                        background: on ? `${cc}22` : "transparent",
+                        color: on ? cc : `${cc}99`,
+                        letterSpacing: "0.04em", transition: "all 0.15s",
+                        textShadow: on ? `0 0 8px ${cc}66` : "none",
+                      }}>{FLAVOR_CAT_NAMES[cat]}</button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 枚数＋ガチャボタン */}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 16, paddingBottom: 16, borderBottom: "1px dashed rgba(232,228,212,0.15)" }}>
+                <span style={{ fontFamily: mono, fontSize: 11, color: DIM }}>枚数:</span>
+                {[1, 3, 5, 8].map(n => (
+                  <button key={n} onClick={() => setFlavorCount(n)} style={{
+                    fontFamily: mono, fontSize: 13, padding: "5px 14px", borderRadius: 2, cursor: "pointer",
+                    background: flavorCount === n ? "rgba(232,228,212,0.2)" : "transparent",
+                    color: flavorCount === n ? CHALK : DIM,
+                    border: `1px solid ${flavorCount === n ? "rgba(232,228,212,0.6)" : "rgba(232,228,212,0.2)"}`,
+                  }}>{n}</button>
+                ))}
+                <button onClick={doDraw} style={{
+                  fontFamily: serif, fontSize: 15, padding: "8px 22px", borderRadius: 2, cursor: "pointer",
+                  background: "rgba(232,228,212,0.15)", color: CHALK,
+                  border: "2px solid rgba(232,228,212,0.5)",
+                  letterSpacing: "0.06em",
+                }}>🎲 ネタを引く</button>
+                <button onClick={generateFlavorByAI} disabled={aiLoading} style={{
+                  fontFamily: serif, fontSize: 15, padding: "8px 22px", borderRadius: 2, cursor: aiLoading ? "default" : "pointer",
+                  background: aiLoading ? "rgba(130,180,160,0.1)" : "rgba(90,160,130,0.2)", color: aiLoading ? DIM : "#90d4b8",
+                  border: `2px solid ${aiLoading ? "rgba(144,212,184,0.2)" : "rgba(144,212,184,0.6)"}`,
+                  letterSpacing: "0.06em", opacity: aiLoading ? 0.7 : 1,
+                }}>{aiLoading ? "⏳ 生成中…" : "✨ AIで生成"}</button>
+                <button onClick={() => { setAiKeyInput(aiApiKey); setAiKeyOpen(v => !v); }} style={{
+                  fontFamily: mono, fontSize: 11, padding: "5px 10px", borderRadius: 2, cursor: "pointer",
+                  background: "transparent", color: aiApiKey ? "#90d4b8" : DIM,
+                  border: `1px solid ${aiApiKey ? "rgba(144,212,184,0.4)" : "rgba(232,228,212,0.2)"}`,
+                }}>{aiApiKey ? "🔑 APIキー設定済" : "🔑 APIキー未設定"}</button>
+                {flavorResults.length > 0 && (
+                  <button onClick={() => setFlavorResults([])} style={{ fontFamily: serif, fontSize: 12, padding: "6px 14px", borderRadius: 2, cursor: "pointer", background: "transparent", color: DIM, border: "1px solid rgba(232,228,212,0.2)" }}>
+                    黒板を消す
+                  </button>
+                )}
+              </div>
+
+              {/* APIキー設定パネル */}
+              {aiKeyOpen && (
+                <div style={{ marginBottom: 20, padding: "14px 16px", background: "rgba(144,212,184,0.07)", border: "1px solid rgba(144,212,184,0.3)", borderRadius: 3 }}>
+                  <div style={{ fontFamily: mono, fontSize: 10, letterSpacing: 2, color: "#90d4b8", marginBottom: 8 }}>ANTHROPIC API KEY</div>
+                  <div style={{ fontFamily: serif, fontSize: 12, color: DIM, marginBottom: 10 }}>
+                    Anthropic Console で発行した APIキーを入力してください。キーはこのデバイスの localStorage にのみ保存されます。
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <input
+                      type="password"
+                      value={aiKeyInput}
+                      onChange={e => setAiKeyInput(e.target.value)}
+                      placeholder="sk-ant-..."
+                      style={{
+                        fontFamily: mono, fontSize: 13, padding: "6px 10px", borderRadius: 2, flex: 1, minWidth: 240,
+                        background: "rgba(0,0,0,0.3)", color: CHALK, border: "1px solid rgba(144,212,184,0.4)", outline: "none",
+                      }}
+                    />
+                    <button onClick={() => { saveAiKey(aiKeyInput); setAiKeyOpen(false); }} style={{
+                      fontFamily: serif, fontSize: 13, padding: "6px 16px", borderRadius: 2, cursor: "pointer",
+                      background: "rgba(144,212,184,0.2)", color: "#90d4b8", border: "1px solid rgba(144,212,184,0.5)",
+                    }}>保存</button>
+                    {aiApiKey && <button onClick={() => { saveAiKey(""); setAiKeyOpen(false); }} style={{
+                      fontFamily: serif, fontSize: 13, padding: "6px 12px", borderRadius: 2, cursor: "pointer",
+                      background: "transparent", color: DIM, border: "1px solid rgba(232,228,212,0.2)",
+                    }}>削除</button>}
+                  </div>
+                </div>
+              )}
+
+              {/* AIエラー表示 */}
+              {aiError && (
+                <div style={{ marginBottom: 16, padding: "10px 14px", background: "rgba(220,80,60,0.1)", border: "1px solid rgba(220,80,60,0.4)", borderRadius: 3, fontFamily: mono, fontSize: 12, color: "#e8a0a0" }}>
+                  ⚠ {aiError}
+                </div>
+              )}
+
+              {/* ガチャ結果 */}
+              {flavorResults.length > 0 && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 18, marginBottom: 28, alignItems: "start" }}>
+                  {flavorResults.map((item, i) => flavorCard(item, i))}
+                </div>
+              )}
+
+              {/* 保存した付箋 */}
+              {flavorFavs.length > 0 && (
+                <div style={{ borderTop: "1px solid rgba(232,228,212,0.2)", paddingTop: 20, marginTop: 4 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                    <div style={{ fontFamily: mono, fontSize: 10, letterSpacing: 2, color: DIM }}>SAVED — 挟んだ付箋 {flavorFavs.length}枚</div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {chalkBtn("まとめてコピー", () => { navigator.clipboard?.writeText(flavorFavs.map(f => `・${f.text}`).join("\n")).catch(() => {}); }, false)}
+                      {chalkBtn("全部はがす", () => { if (confirm("挟んだ付箋を全てはがします。よろしいですか?")) saveFlavorFavs([]); }, false)}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {flavorFavs.map(f => {
+                      const cc = chalkColor[f.cat] || CHALK;
+                      return (
+                        <div key={f.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 12px", background: "rgba(255,255,255,0.05)", borderLeft: `3px solid ${cc}88`, borderRadius: 1 }}>
+                          <span style={{ fontFamily: mono, fontSize: 8, color: cc, letterSpacing: 2, paddingTop: 3, flexShrink: 0, textTransform: "uppercase" }}>{FLAVOR_CAT_LABEL[f.cat]}</span>
+                          <span style={{ fontFamily: serif, fontSize: 13, flex: 1, lineHeight: 1.75, color: CHALK }}>{f.text}</span>
+                          <button onClick={() => { addToNeta(f); }} title="ネタ帳に引用" style={{ background: "none", border: "none", color: DIM, cursor: "pointer", fontFamily: serif, fontSize: 11, flexShrink: 0 }}>引用</button>
+                          <button onClick={() => navigator.clipboard?.writeText(f.text).catch(() => {})} title="コピー" style={{ background: "none", border: "none", color: DIM, cursor: "pointer", fontFamily: mono, fontSize: 13, flexShrink: 0 }}>⎘</button>
+                          <button onClick={() => saveFlavorFavs(flavorFavs.filter(x => x.id !== f.id))} style={{ background: "none", border: "none", color: "rgba(232,228,212,0.35)", cursor: "pointer", fontFamily: mono, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>×</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </main>
       </div>
     </div>
