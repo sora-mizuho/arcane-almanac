@@ -1568,6 +1568,7 @@ catの値は必ず bs, rel, act, day のいずれかにしてください。`;
   const [syncCode, setSyncCode] = useState(() => cloud.getCode());
   const [syncStatus, setSyncStatus] = useState("idle"); // idle | syncing | ok | error | off
   const [syncOpen, setSyncOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const hydratedRef = useRef(false); // 初回pull完了まではpushしない
   const pushTimer = useRef(null);
 
@@ -1855,68 +1856,147 @@ catの値は必ず bs, rel, act, day のいずれかにしてください。`;
     <div style={{ minHeight: "100vh", background: T.bg, color: T.paper }}>
       <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", maxWidth: 1240, margin: "0 auto", alignItems: isMobile ? "stretch" : "flex-start" }}>
 
-        {/* ===== ナビ(PC:左サイドバー / スマホ:上部タブ) ===== */}
-        <aside style={isMobile ? {
-          position: "sticky", top: 0, zIndex: 50, background: T.panel,
-          borderBottom: `1px solid ${T.line}`, boxShadow: "0 2px 8px rgba(46,42,35,0.12)",
-        } : {
-          width: 220, flexShrink: 0, position: "sticky", top: 0, alignSelf: "flex-start",
-          height: "100vh", boxSizing: "border-box", overflowY: "auto",
-          background: T.panel, borderRight: `1px solid ${T.line}`, padding: "24px 14px",
-        }}>
-          {!isMobile && (
+        {/* ===== ナビ ===== */}
+        {isMobile ? (
+          <React.Fragment>
+            {/* スマホ: 上部ヘッダーバー */}
+            <div style={{
+              position: "sticky", top: 0, zIndex: 50, background: T.panel,
+              borderBottom: `1px solid ${T.line}`, boxShadow: "0 2px 8px rgba(46,42,35,0.12)",
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "0 16px", height: 52,
+            }}>
+              <div style={{ fontFamily: serif, fontSize: 15, color: T.paper }}>
+                {[
+                  ["home","🏠","ホーム"],["list","📖","探索者名簿"],["journal","📔","セッション日誌"],
+                  ["scenario","📚","シナリオ管理"],["gm","🎲","GMシート"],["plan","📋","プラン"],
+                  ["flavor","🃏","小ネタ帳"],["neta","💡","ネタ帳"],["calendar","📅","カレンダー"],
+                  ["todo","☑","TODO"],["memo","📝","クイックメモ"],["health","🩺","体調記録"],
+                  ["posts","✕","ポスト集"],["watch","▶","視聴リスト"],["illust","🖼","ギャラリー"],
+                ].find(([k]) => k === view)?.[2] ?? ""}
+              </div>
+              <button onClick={() => setMobileNavOpen(true)} style={{
+                background: "none", border: "none", cursor: "pointer", padding: "6px 8px",
+                color: T.paper, fontSize: 22, lineHeight: 1,
+              }}>☰</button>
+            </div>
+
+            {/* ドロワーオーバーレイ */}
+            {mobileNavOpen && (
+              <div style={{
+                position: "fixed", inset: 0, zIndex: 200,
+                display: "flex", alignItems: "stretch",
+              }}>
+                {/* 背景タップで閉じる */}
+                <div onClick={() => setMobileNavOpen(false)} style={{ flex: 1, background: "rgba(0,0,0,0.5)" }} />
+                {/* ドロワー本体 */}
+                <div style={{
+                  width: 260, background: T.panel, overflowY: "auto",
+                  padding: "20px 14px 40px", boxShadow: "-4px 0 20px rgba(0,0,0,0.4)",
+                  display: "flex", flexDirection: "column", gap: 2,
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, paddingBottom: 12, borderBottom: `1px solid ${T.line}` }}>
+                    <div>
+                      <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 2, color: T.gold }}>ARCANE ALMANAC</div>
+                      <div style={{ fontFamily: serif, fontSize: 15, marginTop: 2 }}>記録と予定の手帖</div>
+                    </div>
+                    <button onClick={() => setMobileNavOpen(false)} style={{ background: "none", border: "none", color: T.dim, fontSize: 20, cursor: "pointer" }}>✕</button>
+                  </div>
+
+                  {[
+                    { label: null, items: [["home","🏠","ホーム"]] },
+                    { label: "TRPG", items: [
+                      ["list","📖","探索者名簿"],["journal","📔","セッション日誌"],
+                      ["scenario","📚","シナリオ管理"],["gm","🎲","GMシート"],
+                      ["plan","📋","プラン"],["flavor","🃏","小ネタ帳"],["neta","💡","ネタ帳"],
+                    ]},
+                    { label: "日常", items: [
+                      ["calendar","📅","カレンダー"],["todo","☑","TODO"],
+                      ["memo","📝","クイックメモ"],["health","🩺","体調記録"],
+                    ]},
+                    { label: "コレクション", items: [
+                      ["posts","✕","ポスト集"],["watch","▶","視聴リスト"],["illust","🖼","ギャラリー"],
+                    ]},
+                  ].map(({ label, items }) => (
+                    <React.Fragment key={label ?? "_top"}>
+                      {label && (
+                        <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 2, color: T.gold, opacity: 0.8, padding: "12px 6px 4px" }}>— {label} —</div>
+                      )}
+                      {items.map(([key, icon, name]) => (
+                        <div key={key} onClick={() => { setView(key); setMobileNavOpen(false); }} style={{
+                          display: "flex", alignItems: "center", gap: 10,
+                          padding: "10px 14px", borderRadius: 3, cursor: "pointer",
+                          background: view === key ? T.panel2 : "transparent",
+                          borderLeft: `3px solid ${view === key ? T.gold : "transparent"}`,
+                          color: view === key ? T.paper : T.dim,
+                          fontFamily: serif, fontSize: 15,
+                        }}>
+                          <span style={{ fontSize: 17 }}>{icon}</span>{name}
+                        </div>
+                      ))}
+                    </React.Fragment>
+                  ))}
+
+                  <div style={{ borderTop: `1px solid ${T.line}`, marginTop: 12, paddingTop: 12, display: "grid", gap: 8 }}>
+                    <Btn small onClick={() => { setSyncOpen(true); setMobileNavOpen(false); }}>
+                      {syncCode ? (syncStatus === "ok" ? "☁ 同期中 ✓" : syncStatus === "syncing" ? "☁ 同期…" : syncStatus === "error" ? "☁ 同期エラー" : "☁ 同期") : "☁ 同期を設定"}
+                    </Btn>
+                    <Btn small onClick={exportBackup}>💾 バックアップ</Btn>
+                    <Btn small onClick={() => fileRef.current && fileRef.current.click()}>📂 復元</Btn>
+                  </div>
+                </div>
+              </div>
+            )}
+          </React.Fragment>
+        ) : (
+          /* PC: 左サイドバー */
+          <aside style={{
+            width: 220, flexShrink: 0, position: "sticky", top: 0, alignSelf: "flex-start",
+            height: "100vh", boxSizing: "border-box", overflowY: "auto",
+            background: T.panel, borderRight: `1px solid ${T.line}`, padding: "24px 14px",
+          }}>
             <div style={{ padding: "0 6px 14px", borderBottom: `1px solid ${T.line}`, marginBottom: 14 }}>
               <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 2, color: T.gold }}>ARCANE ALMANAC</div>
               <div style={{ fontFamily: serif, fontSize: 17, marginTop: 4 }}>記録と予定の手帖</div>
               <div style={{ fontFamily: mono, fontSize: 9, color: T.dim, marginTop: 2 }}>CoC 6版・7版対応</div>
             </div>
-          )}
 
-          <div style={isMobile ? { display: "flex", overflowX: "auto", WebkitOverflowScrolling: "touch" } : {}}>
-            {navItem("home", "🏠", "ホーム")}
-            {!isMobile && <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 2, color: T.gold, opacity: 0.7, padding: "10px 6px 4px", marginTop: 4 }}>— TRPG —</div>}
-            {navItem("list", "📖", "探索者名簿")}
-            {navItem("journal", "📔", "セッション日誌")}
-            {navItem("scenario", "📚", "シナリオ管理")}
-            {navItem("gm", "🎲", "GMシート")}
-            {navItem("plan", "📋", "プラン")}
-            {navItem("flavor", "🃏", "小ネタ帳")}
-            {navItem("neta", "💡", "ネタ帳")}
-            {!isMobile && <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 2, color: T.gold, opacity: 0.7, padding: "10px 6px 4px", marginTop: 4 }}>— 日常 —</div>}
-            {navItem("calendar", "📅", "カレンダー")}
-            {navItem("todo", "☑", "TODO")}
-            {navItem("memo", "📝", "クイックメモ")}
-            {navItem("health", "🩺", "体調記録")}
-            {!isMobile && <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 2, color: T.gold, opacity: 0.7, padding: "10px 6px 4px", marginTop: 4 }}>— コレクション —</div>}
-            {navItem("posts", "✕", "ポスト集")}
-            {navItem("watch", "▶", "視聴リスト")}
-            {navItem("illust", "🖼", "ギャラリー")}
-            {isMobile && (
-              <div onClick={() => setSyncOpen(true)}
-                style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 10px", cursor: "pointer", flex: "1 0 auto", minWidth: 64, color: syncStatus === "ok" ? T.green : syncStatus === "error" ? T.red : T.dim, fontFamily: serif, fontSize: 11 }}>
-                <span style={{ fontSize: 19 }}>☁</span>同期
-              </div>
-            )}
-          </div>
+            <div>
+              {navItem("home", "🏠", "ホーム")}
+              <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 2, color: T.gold, opacity: 0.7, padding: "10px 6px 4px", marginTop: 4 }}>— TRPG —</div>
+              {navItem("list", "📖", "探索者名簿")}
+              {navItem("journal", "📔", "セッション日誌")}
+              {navItem("scenario", "📚", "シナリオ管理")}
+              {navItem("gm", "🎲", "GMシート")}
+              {navItem("plan", "📋", "プラン")}
+              {navItem("flavor", "🃏", "小ネタ帳")}
+              {navItem("neta", "💡", "ネタ帳")}
+              <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 2, color: T.gold, opacity: 0.7, padding: "10px 6px 4px", marginTop: 4 }}>— 日常 —</div>
+              {navItem("calendar", "📅", "カレンダー")}
+              {navItem("todo", "☑", "TODO")}
+              {navItem("memo", "📝", "クイックメモ")}
+              {navItem("health", "🩺", "体調記録")}
+              <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 2, color: T.gold, opacity: 0.7, padding: "10px 6px 4px", marginTop: 4 }}>— コレクション —</div>
+              {navItem("posts", "✕", "ポスト集")}
+              {navItem("watch", "▶", "視聴リスト")}
+              {navItem("illust", "🖼", "ギャラリー")}
+            </div>
 
-          {!isMobile && (
-            <React.Fragment>
-              <div style={{ borderTop: `1px solid ${T.line}`, margin: "14px 0", paddingTop: 14 }}>
-                <div onClick={spinPick}
-                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", cursor: "pointer", color: T.gold, fontFamily: serif, fontSize: 14 }}>
-                  <span style={{ fontSize: 16 }}>🎲</span>ランダムピック
-                </div>
+            <div style={{ borderTop: `1px solid ${T.line}`, margin: "14px 0", paddingTop: 14 }}>
+              <div onClick={spinPick}
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", cursor: "pointer", color: T.gold, fontFamily: serif, fontSize: 14 }}>
+                <span style={{ fontSize: 16 }}>🎲</span>ランダムピック
               </div>
-              <div style={{ padding: "0 8px", display: "grid", gap: 8, marginTop: 4 }}>
-                <Btn small onClick={() => setSyncOpen(true)}>
-                  {syncCode ? (syncStatus === "ok" ? "☁ 同期中 ✓" : syncStatus === "syncing" ? "☁ 同期…" : syncStatus === "error" ? "☁ 同期エラー" : "☁ 同期") : "☁ 同期を設定"}
-                </Btn>
-                <Btn small onClick={exportBackup}>💾 バックアップ</Btn>
-                <Btn small onClick={() => fileRef.current && fileRef.current.click()}>📂 復元</Btn>
-              </div>
-            </React.Fragment>
-          )}
-        </aside>
+            </div>
+            <div style={{ padding: "0 8px", display: "grid", gap: 8, marginTop: 4 }}>
+              <Btn small onClick={() => setSyncOpen(true)}>
+                {syncCode ? (syncStatus === "ok" ? "☁ 同期中 ✓" : syncStatus === "syncing" ? "☁ 同期…" : syncStatus === "error" ? "☁ 同期エラー" : "☁ 同期") : "☁ 同期を設定"}
+              </Btn>
+              <Btn small onClick={exportBackup}>💾 バックアップ</Btn>
+              <Btn small onClick={() => fileRef.current && fileRef.current.click()}>📂 復元</Btn>
+            </div>
+          </aside>
+        )}
 
         {/* ===== 右メイン ===== */}
         <main style={{ flex: 1, minWidth: 0, padding: isMobile ? "16px 14px 60px" : "28px 24px 60px" }}>
