@@ -1874,20 +1874,23 @@ catの値は必ず bs, rel, act, day のいずれかにしてください。`;
 
           <div style={isMobile ? { display: "flex", overflowX: "auto", WebkitOverflowScrolling: "touch" } : {}}>
             {navItem("home", "🏠", "ホーム")}
-            {navItem("calendar", "📅", "カレンダー")}
-            {navItem("posts", "✕", "ポスト集")}
+            {!isMobile && <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 2, color: T.gold, opacity: 0.7, padding: "10px 6px 4px", marginTop: 4 }}>— TRPG —</div>}
             {navItem("list", "📖", "探索者名簿")}
             {navItem("journal", "📔", "セッション日誌")}
-            {navItem("watch", "▶", "視聴リスト")}
-            {navItem("memo", "📝", "クイックメモ")}
             {navItem("scenario", "📚", "シナリオ管理")}
-            {navItem("todo", "☑", "TODO")}
-            {navItem("plan", "📋", "プラン")}
             {navItem("gm", "🎲", "GMシート")}
-            {navItem("neta", "💡", "ネタ帳")}
-            {navItem("illust", "🖼", "ギャラリー")}
-            {navItem("health", "🩺", "体調記録")}
+            {navItem("plan", "📋", "プラン")}
             {navItem("flavor", "🃏", "小ネタ帳")}
+            {navItem("neta", "💡", "ネタ帳")}
+            {!isMobile && <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 2, color: T.gold, opacity: 0.7, padding: "10px 6px 4px", marginTop: 4 }}>— 日常 —</div>}
+            {navItem("calendar", "📅", "カレンダー")}
+            {navItem("todo", "☑", "TODO")}
+            {navItem("memo", "📝", "クイックメモ")}
+            {navItem("health", "🩺", "体調記録")}
+            {!isMobile && <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 2, color: T.gold, opacity: 0.7, padding: "10px 6px 4px", marginTop: 4 }}>— コレクション —</div>}
+            {navItem("posts", "✕", "ポスト集")}
+            {navItem("watch", "▶", "視聴リスト")}
+            {navItem("illust", "🖼", "ギャラリー")}
             {isMobile && (
               <div onClick={() => setSyncOpen(true)}
                 style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 10px", cursor: "pointer", flex: "1 0 auto", minWidth: 64, color: syncStatus === "ok" ? T.green : syncStatus === "error" ? T.red : T.dim, fontFamily: serif, fontSize: 11 }}>
@@ -4908,28 +4911,61 @@ catの値は必ず bs, rel, act, day のいずれかにしてください。`;
               color: CHALK, border: "1px solid rgba(232,228,212,0.35)",
             }}>{label}</button>
           );
+          const noteColor = { bs: "#fdf6c3", rel: "#fde0e0", act: "#dff5ec", day: "#deeeff" };
+          const noteLineColor = { bs: "#e8d96a", rel: "#f0a8a8", act: "#8fd4bc", day: "#8bb8e8" };
+          const noteTextColor = { bs: "#4a3c00", rel: "#5a1a1a", act: "#0f3d30", day: "#0f2d50" };
+          const noteDimColor = { bs: "#a09060", rel: "#a06060", act: "#409070", day: "#4070a0" };
           const flavorCard = (item, idx) => {
             const isSaved = flavorFavs.some(f => f.text === item.text);
-            const cc = chalkColor[item.cat] || CHALK;
-            const rot = ["0.6deg", "-0.7deg", "0.3deg", "-0.5deg"][idx % 4];
+            const bg = noteColor[item.cat] || "#fdf6c3";
+            const line = noteLineColor[item.cat] || "#e8d96a";
+            const tc = noteTextColor[item.cat] || "#333";
+            const dim = noteDimColor[item.cat] || "#888";
             return (
               <div key={item.id} style={{
-                background: "rgba(255,255,255,0.07)", border: `1px solid rgba(232,228,212,0.18)`,
-                borderTop: `2px solid ${cc}88`, borderRadius: 2, padding: "16px 16px 12px",
-                transform: `rotate(${rot})`, display: "flex", flexDirection: "column", gap: 10,
+                background: bg,
+                borderRadius: "2px 2px 2px 2px",
+                padding: "0 0 12px 0",
+                display: "flex", flexDirection: "column",
+                boxShadow: "2px 3px 8px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.2)",
+                position: "relative",
               }}>
-                <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 3, color: cc, textTransform: "uppercase", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span>{FLAVOR_CAT_LABEL[item.cat]} · {FLAVOR_CAT_NAMES[item.cat]}</span>
-                  {item.aiGenerated && <span style={{ fontSize: 8, letterSpacing: 1, color: "#90d4b8", border: "1px solid rgba(144,212,184,0.4)", borderRadius: 2, padding: "1px 5px" }}>AI</span>}
+                {/* ミシン目風のテープ部分 */}
+                <div style={{
+                  background: `${line}cc`,
+                  height: 28, borderRadius: "2px 2px 0 0",
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "0 12px",
+                  borderBottom: `1px dashed ${line}`,
+                }}>
+                  <span style={{ fontFamily: mono, fontSize: 9, letterSpacing: 2, color: tc, opacity: 0.7, textTransform: "uppercase" }}>
+                    {FLAVOR_CAT_NAMES[item.cat]}
+                  </span>
+                  {item.aiGenerated && <span style={{ fontSize: 8, letterSpacing: 1, color: tc, opacity: 0.6, border: `1px solid ${tc}44`, borderRadius: 2, padding: "1px 5px" }}>AI</span>}
                 </div>
-                <div style={{ fontFamily: serif, fontSize: 14, lineHeight: 1.9, color: CHALK, flex: 1, letterSpacing: "0.02em" }}>
-                  {item.text}
+                {/* 横罫線背景 */}
+                <div style={{
+                  padding: "14px 16px 10px",
+                  flex: 1,
+                  backgroundImage: "none",
+                }}>
+                  <div style={{ fontFamily: serif, fontSize: 14, lineHeight: "28px", color: tc, letterSpacing: "0.02em" }}>
+                    {item.text}
+                  </div>
                 </div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", borderTop: "1px dashed rgba(232,228,212,0.2)", paddingTop: 8 }}>
-                  {chalkBtn(isSaved ? "保存済✓" : "付箋に保存", () => addFav(item), isSaved)}
-                  {chalkBtn("ネタ帳に引用", () => { addToNeta(item); }, false)}
-                  {chalkBtn("コピー", () => navigator.clipboard?.writeText(item.text).catch(() => {}), false)}
-                  {chalkBtn("引き直す", () => redraw(idx), false)}
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "4px 12px 0", borderTop: `1px dashed ${line}88` }}>
+                  {[
+                    [isSaved ? "保存済✓" : "付箋に保存", () => addFav(item), isSaved],
+                    ["ネタ帳に引用", () => addToNeta(item), false],
+                    ["コピー", () => navigator.clipboard?.writeText(item.text).catch(() => {}), false],
+                    ["引き直す", () => redraw(idx), false],
+                  ].map(([label, fn, active]) => (
+                    <button key={label} onClick={fn} style={{
+                      fontFamily: serif, fontSize: 11, padding: "3px 9px", borderRadius: 2, cursor: "pointer",
+                      background: active ? `${line}88` : "transparent",
+                      color: dim, border: `1px solid ${line}`,
+                    }}>{label}</button>
+                  ))}
                 </div>
               </div>
             );
