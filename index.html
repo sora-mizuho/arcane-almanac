@@ -1854,7 +1854,7 @@ catの値は必ず bs, rel, act, day のいずれかにしてください。`;
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.paper }}>
-      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", maxWidth: 1240, margin: "0 auto", alignItems: isMobile ? "stretch" : "flex-start" }}>
+      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", maxWidth: 1240, margin: "0 auto", alignItems: isMobile ? "stretch" : "flex-start", minWidth: 0, overflow: "hidden" }}>
 
         {/* ===== ナビ ===== */}
         {isMobile ? (
@@ -2171,7 +2171,7 @@ catの値は必ず bs, rel, act, day のいずれかにしてください。`;
                 );
               })()}
 
-              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 320px), 1fr))", gap: 16 }}>
                 <Section title="UPCOMING — 今後7日間">
                   {upcoming.length === 0 ? (
                     <div style={{ fontFamily: serif, fontSize: 13, color: T.dim }}>7日以内の予定はありません</div>
@@ -2199,10 +2199,10 @@ catの値は必ず bs, rel, act, day のいずれかにしてください。`;
                         const ch = charById(j.characterId);
                         return (
                           <div key={j.id} onClick={() => { setJournalFocusId(j.id); setView("journal"); }}
-                            style={{ cursor: "pointer", display: "flex", gap: 8, alignItems: "baseline" }}>
-                            <span style={{ fontFamily: mono, fontSize: 11, color: T.dim, whiteSpace: "nowrap" }}>{j.date}</span>
-                            <span style={{ fontFamily: serif, fontSize: 13, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.scenario || "(シナリオ名未記入)"}</span>
-                            {ch && <span style={{ fontFamily: serif, fontSize: 11, color: T.green, whiteSpace: "nowrap" }}>{ch.name}</span>}
+                            style={{ cursor: "pointer", display: "flex", gap: 8, alignItems: "baseline", overflow: "hidden", minWidth: 0 }}>
+                            <span style={{ fontFamily: mono, fontSize: 11, color: T.dim, whiteSpace: "nowrap", flexShrink: 0 }}>{j.date}</span>
+                            <span style={{ fontFamily: serif, fontSize: 13, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{j.scenario || "(シナリオ名未記入)"}</span>
+                            {ch && <span style={{ fontFamily: serif, fontSize: 11, color: T.green, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0, maxWidth: "28%" }}>{ch.name}</span>}
                           </div>
                         );
                       })}
